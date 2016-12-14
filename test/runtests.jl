@@ -5,10 +5,9 @@ dir = dirname(@__FILE__)
 
 include("testfunctions.jl")
 
-controlflow_1_cleantypedast = clean_typed(controlflow_1, (Int, Int))
 # jeez, lets just test that it doesn't fail doing it.
 # TODO test the resulting AST
-
+controlflow_1_cleantypedast = clean_typed(controlflow_1, (Int, Int))
 
 controlflow_1_cleanast = code_lowered_clean(controlflow_1, (Int, Int))
 

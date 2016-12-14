@@ -56,7 +56,7 @@ function extract_type(x::Expr, slots)
     if x.head == :(::)
         x.args[2]
     else
-        extract_type(add_typing(x, slots), slots)
+        extract_type(insert_types(x, slots), slots)
     end
 end
 function get_func(x::Expr)
@@ -72,34 +72,67 @@ function extract_func(x::Expr, slots)
     @assert x.head == :call
     f = get_func(x.args[1])
     args = x.args[2:end]
-    typed = add_typing(args, slots)
+    typed = insert_types(args, slots)
     _typed = !isa(typed, Vector) ? Any[typed] : typed
     f, _typed
 end
+isa_applytype(x) = false
+function isa_applytype(x::Expr)
+    x.head == :. && x.args[1] == :Core && x.args[2] == QuoteNode(:apply_type)
+end
+function isa_applytype(x::GlobalRef)
+    x.mod == Core && x.name == :apply_type
+end
+function isa_applytype(x::Expr)
+    x.head == :call || return false
+    isa_applytype(x.args[1])
+end
+applytype_args(x::Expr) = x.args[2:end]
 
-
+function applytype_type(x::Expr)
+    Targs = x.args[2:end]
+    Expr(:curly, Targs...)
+end
 """
-Takes an AST and a slot dictionary (gotten with )
+Takes an AST and a slot dictionary (gotten with slot_dictionary)
 """
 function insert_types(ast::Expr, slot_dict)
     replace_expr(ast) do expr
+
         if haskey(slot_dict, expr)
             return true, Expr(:(::), expr, slot_dict[expr])
         end
-        result = @match expr begin
+        if isa(expr, Symbol) # symbol not in slot_dict -> can't do much about it
+            return true, expr
+        end
+        if !isa(expr, Expr)
+            # TODO, figure out what value we can expect here, that are not symbols or values
+            return true, insert_types(expr, slot_dict)
+        end
+        # TODO only expand unmatched without recursion loop!
+        # Maybe recurse iff expand(expr) != expr (seems fragile)
+        result = @match expand(expr) begin
             (lh_ = rh_) => begin
                 lh = insert_types(lh, slot_dict)
                 rh = insert_types(rh, slot_dict)
                 true, Expr(:(=), lh, rh)
             end
+            # function call
+            Core.apply_type(Targs__)(args__) => begin
+                return true, Expr(:(::), Expr(:call, T, args...), T)
+            end
             f_(args__) => begin
+                if isa_applytype(f)
+                    T = applytype_type(f)
+                    return true, Expr(:(::), Expr(:call, T, args...), T)
+                end
                 typed_args = map(args) do arg
                     insert_types(arg, slot_dict)
                 end
                 types = tuple(map(x-> extract_type(x, slot_dict), typed_args)...)
                 func = get_func(f)
                 T = return_type(func, types)
-                true, Expr(:(::), Expr(:call, f, args...), T)
+                true, Expr(:(::), Expr(:call, f, typed_args...), T)
             end
             _ => false, expr
         end
@@ -110,5 +143,14 @@ function insert_types{T}(value::T, slot_dict)
 end
 
 function insert_types(sym::Symbol, slot_dict)
-    Expr(:(::), sym, slot_dict[sym])
+    if haskey(slot_dict, sym)
+        Expr(:(::), sym, slot_dict[sym])
+    else
+        # TODO, pass through functions module!
+        if isdefined(sym)
+            return Expr(:(::), sym, typeof(getfield(current_module(), sym)))
+        else
+            sym # symbol not in slot_dict -> can't do much about it
+        end
+    end
 end
