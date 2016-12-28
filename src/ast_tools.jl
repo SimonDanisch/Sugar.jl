@@ -1,8 +1,8 @@
 function filter_expr(keep, ast)
-    replace_or_drop(x-> (false, x), x->!keep(x), identity, Any[ast])[1]
+    replace_or_drop(x-> (false, x), x-> !keep(x), ast)
 end
 function replace_expr(f, ast)
-    replace_or_drop(f, x-> false, Any[ast])[1]#ever drop
+    replace_or_drop(f, x-> false, ast) # never drop/filter
 end
 function replace_or_drop(f, drop, ast::Vector, result = [])
     for elem in ast
@@ -11,6 +11,15 @@ function replace_or_drop(f, drop, ast::Vector, result = [])
     result
 end
 
+function similar_expr(x::Expr, args)
+    expr = Expr(x.head)
+    expr.typ = x.typ
+    expr.args = args
+    expr
+end
+similar_expr(x::Expr) = similar_expr(x, [])
+
+
 function replace_or_drop(f, drop, ast, result = [])
     drop(ast) && return result
     replace, replacement = f(ast)
@@ -18,7 +27,7 @@ function replace_or_drop(f, drop, ast, result = [])
         push!(result, replacement)
     else
         expr = if isa(ast, Expr)
-            nexpr = Expr(ast.head)
+            nexpr = similar_expr(ast)
             replace_or_drop(f, drop, ast.args, nexpr.args)
             nexpr
         else
@@ -89,9 +98,12 @@ function isa_applytype(x::Expr)
 end
 applytype_args(x::Expr) = x.args[2:end]
 
-function applytype_type(x::Expr)
+function applytype_type(x::Expr, args)
     Targs = x.args[2:end]
     Expr(:curly, Targs...)
+end
+function applytype_type(x::GlobalRef, args::Vector)
+    Expr(:curly,  args...)
 end
 """
 Takes an AST and a slot dictionary (gotten with slot_dictionary)
@@ -118,12 +130,9 @@ function insert_types(ast::Expr, slot_dict)
                 true, Expr(:(=), lh, rh)
             end
             # function call
-            Core.apply_type(Targs__)(args__) => begin
-                return true, Expr(:(::), Expr(:call, T, args...), T)
-            end
             f_(args__) => begin
                 if isa_applytype(f)
-                    T = applytype_type(f)
+                    T = applytype_type(f, args)
                     return true, Expr(:(::), Expr(:call, T, args...), T)
                 end
                 typed_args = map(args) do arg
@@ -131,6 +140,7 @@ function insert_types(ast::Expr, slot_dict)
                 end
                 types = tuple(map(x-> extract_type(x, slot_dict), typed_args)...)
                 func = get_func(f)
+                @show func types
                 T = return_type(func, types)
                 true, Expr(:(::), Expr(:call, f, typed_args...), T)
             end
@@ -153,4 +163,64 @@ function insert_types(sym::Symbol, slot_dict)
             sym # symbol not in slot_dict -> can't do much about it
         end
     end
+end
+_normalize_ast(value) = true, value
+function _normalize_ast(qn::QuoteNode)
+    return true, qn.value
+end
+function _normalize_ast(expr::Expr)
+    if expr.head == :invoke
+        lam = expr.args[1] # Ignore lambda for now
+        res = similar_expr(expr, map(normalize_ast, view(res.args, 2:length(expr.args))))
+        return true, res
+    elseif expr.head == :new
+        return true, similar_expr(expr, map(normalize_ast, expr.args))
+    elseif expr.head == :static_parameter# TODO do something reasonable with static and meta
+        return true, nothing
+    elseif expr.head == :meta
+        return true, nothing
+    elseif expr.head == :call
+        f = expr.args[1]
+        if Sugar.isa_applytype(f)
+            args = expr.args[2:end]
+            T = applytype_type(f, args)
+
+            return true, similar_expr(expr, vcat(T, map(normalize_ast, args)))
+        end
+        return true, similar_expr(expr, map(normalize_ast, expr.args))
+    end
+    return false, expr
+end
+function normalize_ast(expr)
+    ast = Sugar.replace_expr(_normalize_ast, expr)
+    Sugar.replace_or_drop(x-> (false, x), x-> x == nothing, ast)
+end
+
+
+function remove_inline(list)
+    stack = []; result = []
+    for elem in list
+        if isa(elem, Expr) && elem.head == :meta
+            if elem.args[1] == :push_loc
+                inexpr = Expr(:inlined_func, elem.args[2:end]...)
+                if !isempty(stack)
+                    push!(last(stack).args, inexpr) # add to parent
+                end
+                push!(stack, inexpr)
+            elseif elem.args[1] == :pop_loc
+                if isempty(stack)
+                    error("found pop_loc, but there was no push_loc")
+                end
+                expr = pop!(stack)
+                if isempty(stack)
+                    push!(result, expr)
+                end
+            end
+        elseif !isempty(stack) # we're in the middle of an inline expr
+            push!(last(stack).args, elem)
+        else
+            push!(result, elem)
+        end
+    end
+    result
 end

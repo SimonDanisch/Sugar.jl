@@ -54,6 +54,8 @@ _tuple{T<:Tuple}(x::Type{T}) = tuple(x.parameters...)
 _typeof{T}(x::Type{T}) = Type{T}
 _typeof{T}(x::T) = T
 
+jlhome() = ccall(:jl_get_julia_home, Any, ())
+
 function juliabasepath(file)
   srcdir = joinpath(jlhome(),"..","..","base")
   releasedir = joinpath(jlhome(),"..","share","julia","base")
@@ -63,7 +65,7 @@ end
 function get_source_file(path::AbstractString, ln)
     isfile(path) && return path
     # if not a file, it might be in julia base
-    file = juliabasepath(file)
+    file = juliabasepath(path)
     if !isfile(file)
         throw(LoadError(path, ln, ErrorException("file not found")))
     end
@@ -91,8 +93,12 @@ function get_static_parameters(f, types)
     spnames, sptypes
 end
 
-function get_lambda(pass, f, types)
-    lambda = pass(f, types)
+function get_lambda(pass, f, types, optimize = false)
+    lambda = if pass == code_typed
+        pass(f, types, optimize = optimize)
+    else
+        pass(f, types)
+    end
     if isa(lambda, Vector)
         if isempty(lambda)
             throw(NoMethodError(f, types))
@@ -141,9 +147,7 @@ end
 Looks up the source of `method` in the file path found in `method`.
 Returns the AST and source string, might throw an LoadError if file not found.
 """
-function get_source(method)
-    file = string(method.file)
-    linestart = method.line
+function get_source_at(file, linestart)
     file = get_source_file(file, linestart)
     code, str = open(file) do io
         line = ""
@@ -163,6 +167,13 @@ function get_source(method)
             end
         end
     end
+    code, str
+end
+
+function get_source(method)
+    file = string(method.file)
+    linestart = method.line
+    code, str = get_source_at(file, linestart)
     # for consistency, we always return the `function f(args...) end` form
     long = MacroTools.longdef(code)
     # and return only the body

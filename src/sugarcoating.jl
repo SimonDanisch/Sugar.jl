@@ -23,6 +23,9 @@ function remove_goto(ast)
         whilebody = replace_continue_break(collect(whilebody), continue_label[1], break_label[1])
         push!(whilebody, continue_label[1])
         whilebody = remove_goto(whilebody)
+        if last(whilebody) == continue_label[1] # TODO, I guess this will never be removed anyways, so we could just always pop it
+            pop!(whilebody)
+        end
         block = Expr(:block, whilebody...)
         Expr(:while, condition, block)
     end
@@ -41,8 +44,9 @@ function remove_goto(ast)
 end
 
 
-function code_lowered_clean(f, types)
-    ast = get_ast(code_lowered, f, types)
+function sugared(f, types, stage = code_lowered)
+    ast = get_ast(stage, f, types)
+    ast = normalize_ast(ast)
     ast = remove_goto(filter(x-> x != nothing && !is_linenumber(x), ast))
     body = Expr(:block)
     append!(body.args, ast)
