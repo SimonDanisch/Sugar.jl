@@ -6,6 +6,7 @@ import Base: show_generator, show_call
 
 
 abstract ASTIO <: IO
+
 Base.print(io::ASTIO, args...) = print(io.io, args...)
 Base.print(io::ASTIO, arg::String) = print(io.io, arg)
 Base.print(io::ASTIO, arg::Char) = print(io.io, arg)
@@ -14,12 +15,26 @@ Base.write(io::ASTIO, args...) = write(io.io, args...)
 Base.write(io::ASTIO, arg::UInt8) = write(io.io, arg)
 Base.write(io::ASTIO, arg::String) = write(io.io, arg)
 Base.write(io::ASTIO, arg::Char) = write(io.io, arg)
+
 immutable ExprNotSupported
     message::String
     line::Int
 end
 
 unsupported_expr(message, line) = throw(ExprNotSupported(message, line))
+
+
+get_type(io::ASTIO, x::Expr) = x.typ
+get_type{T}(io::ASTIO, x::T) = T
+get_type(io::ASTIO, slot::Slot) = get_slottypename(io, slot)[1]
+function get_type(io::ASTIO, slot::SSAValue)
+    li = io.lambdainfo
+    if isa(li, LambdaInfo)
+        ssatypes = (li::LambdaInfo).ssavaluetypes
+        return ssatypes[slot.id + 1]
+    end
+    error("What's up with dat LambdaInfo? $slot, $li")
+end
 
 function get_slottypename(io::ASTIO, ex)
     typ = isa(ex, TypedSlot) ? ex.typ : Any
@@ -45,6 +60,6 @@ end
 
 ssavalue_name(ssa::SSAValue) = string("_ssavalue_", ssa.id)
 
-function Base.show_unquoted(io::ASTIO, ssa::SSAValue, ::Int, ::Int)
-    print(io, ssavalue_name(ssa))
-end
+# function Base.show_unquoted(io::ASTIO, ssa::SSAValue, ::Int, ::Int)
+#     print(io, ssavalue_name(ssa))
+# end

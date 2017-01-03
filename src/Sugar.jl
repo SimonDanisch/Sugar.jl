@@ -19,4 +19,7 @@ export slot_vector, get_lambda, clean_typed
 include("sugarcoating.jl")
 export remove_goto, sugared
 
+include("show.jl")
+
+
 end # module
