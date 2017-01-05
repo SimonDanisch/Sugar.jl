@@ -26,6 +26,7 @@ unsupported_expr(message, line) = throw(ExprNotSupported(message, line))
 
 get_type(io::ASTIO, x::Expr) = x.typ
 get_type{T}(io::ASTIO, x::T) = T
+get_type(io::ASTIO, x::GlobalRef) = typeof(eval(x))
 get_type(io::ASTIO, slot::Slot) = get_slottypename(io, slot)[1]
 function get_type(io::ASTIO, slot::SSAValue)
     li = io.lambdainfo
