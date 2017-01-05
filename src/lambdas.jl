@@ -94,6 +94,9 @@ function get_static_parameters(f, types)
 end
 
 function get_lambda(pass, f, types, optimize = false)
+    if isa(f, Core.IntrinsicFunction)
+        error("$f is an intrinsic function")
+    end
     lambda = if pass == code_typed
         pass(f, types, optimize = optimize)
     else
