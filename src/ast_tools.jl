@@ -176,7 +176,8 @@ function _normalize_ast(expr::Expr)
     elseif expr.head == :new
         return true, similar_expr(expr, map(normalize_ast, expr.args))
     elseif expr.head == :static_parameter# TODO do something reasonable with static and meta
-        return true, nothing
+        # TODO, can other static parameters beside literal values escape with code_typed, optimization = false?
+        return true, expr.args[1]
     elseif expr.head == :meta
         return true, nothing
     elseif expr.head == :call
@@ -184,7 +185,6 @@ function _normalize_ast(expr::Expr)
         if Sugar.isa_applytype(f)
             args = expr.args[2:end]
             T = applytype_type(f, args)
-
             return true, similar_expr(expr, vcat(T, map(normalize_ast, args)))
         end
         return true, similar_expr(expr, map(normalize_ast, expr.args))

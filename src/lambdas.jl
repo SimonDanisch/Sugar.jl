@@ -131,7 +131,7 @@ function get_method(f, types)
     # make sure there is a specialization with precompile
     # TODO, figure out a better way, since this method is not very reliable.
     # (I think, e.g. anonymous functions don't work)
-    precompile(f, types)
+    precompile(f, (types...))
     x = methods(f, types)
     if isempty(x)
         throw(NoMethodError(f, types))
