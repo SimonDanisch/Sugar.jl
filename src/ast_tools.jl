@@ -174,7 +174,11 @@ function _normalize_ast(expr::Expr)
         res = similar_expr(expr, map(normalize_ast, view(res.args, 2:length(expr.args))))
         return true, res
     elseif expr.head == :new
-        return true, similar_expr(expr, map(normalize_ast, expr.args))
+        typ = expr.args[1].typ
+        T = typ.parameters[1] # is this hacky? It looks hacky!
+        expr = Expr(:call, T, map(normalize_ast, expr.args[2:end])...)
+        expr.typ = typ
+        return true, expr
     elseif expr.head == :static_parameter# TODO do something reasonable with static and meta
         # TODO, can other static parameters beside literal values escape with code_typed, optimization = false?
         return true, expr.args[1]
