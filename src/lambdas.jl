@@ -14,7 +14,12 @@
 
 immutable NoMethodError <: Exception
     func
-    types
+    types::Tuple
+end
+NoMethodError(f, types::Type) = NoMethodError(f, (types.parameters...))
+function Base.showerror(io::IO, e::NoMethodError)
+    args = join(map(t->"::$t", e.types), ", ")
+    print(io, "$(e.func)($args) couldn't be found")
 end
 
 # Give string based stages a type
@@ -37,10 +42,6 @@ function CodeNative(f, types)
     CodeNative(src)
 end
 
-function Base.showerror(io::IO, e::NoMethodError)
-    args = join(map(t->"::$t", e.types), ", ")
-    print(io, "$(e.func)($args) couldn't be found")
-end
 
 const SCodeInfo = VERSION < v"0.6.0-dev" ? LambdaInfo : CodeInfo
 
@@ -94,13 +95,17 @@ function get_static_parameters(f, types)
 end
 
 function get_lambda(pass, f, types, optimize = false)
-    if isa(f, Core.IntrinsicFunction)
+    if isintrinsic(f)
         error("$f is an intrinsic function")
     end
-    lambda = if pass == code_typed
-        pass(f, types, optimize = optimize)
-    else
-        pass(f, types)
+    lambda = try
+        if pass == code_typed
+            pass(f, types, optimize = optimize)
+        else
+            pass(f, types)
+        end
+    catch e
+        error("Couldn't get lambda for $f $types:\n$e")
     end
     if isa(lambda, Vector)
         if isempty(lambda)
@@ -123,8 +128,10 @@ function get_lambda(pass, f, types, optimize = false)
         error("Not sure what's up with returntype of $pass. Returned: $lambda")
     end
 end
-
-function get_method(f, types)
+function get_method(f, types::Type)
+    get_method(f, (types.parameters...))
+end
+function get_method(f, types::Tuple)
     if !all(isleaftype, types)
         error("Not all types are concrete: $types")
     end

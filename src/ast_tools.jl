@@ -168,20 +168,25 @@ _normalize_ast(value) = true, value
 function _normalize_ast(qn::QuoteNode)
     return true, qn.value
 end
+
+function resolve_typ(x::Expr)
+    x.typ.parameters[1]
+end
+resolve_typ(x::GlobalRef) = eval(x)
+
 function _normalize_ast(expr::Expr)
     if expr.head == :invoke
         lam = expr.args[1] # Ignore lambda for now
         res = similar_expr(expr, map(normalize_ast, view(res.args, 2:length(expr.args))))
         return true, res
     elseif expr.head == :new
-        typ = expr.args[1].typ
-        T = typ.parameters[1] # is this hacky? It looks hacky!
+        T = resolve_typ(expr.args[1])
         expr = Expr(:call, T, map(normalize_ast, expr.args[2:end])...)
-        expr.typ = typ
+        expr.typ = T
         return true, expr
-    elseif expr.head == :static_parameter# TODO do something reasonable with static and meta
-        # TODO, can other static parameters beside literal values escape with code_typed, optimization = false?
-        return true, expr.args[1]
+    # elseif expr.head == :static_parameter# TODO do something reasonable with static and meta
+    #     # TODO, can other static parameters beside literal values escape with code_typed, optimization = false?
+    #     return true, expr.args[1]
     elseif expr.head == :meta
         return true, nothing
     elseif expr.head == :call

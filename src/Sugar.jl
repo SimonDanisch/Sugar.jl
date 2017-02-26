@@ -1,6 +1,6 @@
 module Sugar
 
-using Matcha, MacroTools
+using Matcha, MacroTools, DataStructures
 
 # All kind of patterns for regex/matcha. Contains also matching isa functions
 include("patterns.jl")
@@ -20,6 +20,9 @@ include("sugarcoating.jl")
 export remove_goto, sugared
 
 include("show.jl")
+
+# helper to work with methods
+include("methods.jl")
 
 
 end # module
