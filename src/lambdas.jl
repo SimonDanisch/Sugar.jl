@@ -67,7 +67,7 @@ function get_source_file(path::AbstractString, ln)
     # if not a file, it might be in julia base
     file = juliabasepath(path)
     if !isfile(file)
-        throw(LoadError(path, ln, ErrorException("file not found")))
+        throw(LoadError(path, ln, ErrorException("file $path not found")))
     end
     file
 end
@@ -163,7 +163,7 @@ function get_source_at(file, linestart)
             line = readline(io)
         end
         while !eof(io)
-            line = line*readline(io)
+            line = line * "\n" * readline(io)
             e = Base.parse_input_line(line; filename=file)
             if !(isa(e,Expr) && e.head === :incomplete)
                 return e, line
