@@ -2,7 +2,7 @@
 Method type, that you can lazily ask for all kind of information,
 e.g. AST, lambdainfo, arguments, dependencies etc.
 """
-type LazyMethod
+type LazyMethod{T}
     signature
     cache
     decls::OrderedSet
@@ -12,12 +12,17 @@ type LazyMethod
     ast::Expr
     source::String
     funcheader::String
-    LazyMethod(signature, cache = Dict()) = new(signature, cache, OrderedSet(), OrderedSet{LazyMethod}())
+    LazyMethod(signature, cache = Dict()) = new{T}(signature, cache, OrderedSet(), OrderedSet{LazyMethod}())
 end
-LazyMethod(f::Function, types::Type) = LazyMethod((f, types))
-const Funzies = Union{Function, Core.Builtin, Core.IntrinsicFunction}
+
+LazyMethod(signature) = LazyMethod{:JL}(signature)
+LazyMethod(f::Function, types::Type) = LazyMethod{:JL}((f, types))
+
+const AllFuncs = Union{Function, Core.Builtin, Core.IntrinsicFunction}
+const IntrinsicFuncs = Union{Core.Builtin, Core.IntrinsicFunction}
+
 function isfunction(x::LazyMethod)
-    isa(x.signature, Tuple) && length(x.signature) == 2 && isa(x.signature[1], Funzies)
+    isa(x.signature, Tuple) && length(x.signature) == 2 && isa(x.signature[1], AllFuncs)
 end
 function istype(x::LazyMethod)
     isa(x.signature, DataType)
@@ -28,16 +33,17 @@ function getfunction(x::LazyMethod)
 end
 
 
-isintrinsic(f::Union{Core.Builtin, Core.IntrinsicFunction}) = true
+isintrinsic(f::IntrinsicFuncs) = true
 isintrinsic(f) = false
+
 function isintrinsic(x::LazyMethod)
     isfunction(x) && isintrinsic(getfunction(x))
 end
 function Base.push!(decl::LazyMethod, x::LazyMethod)
     push!(decl.dependencies, x)
 end
-function Base.push!(decl::LazyMethod, signature)
-    push!(decl.dependencies, LazyMethod(signature, decl.cache))
+function Base.push!{T}(decl::LazyMethod{T}, signature)
+    push!(decl.dependencies, LazyMethod{T}(signature, decl.cache))
 end
 
 import Base: ==
@@ -81,10 +87,10 @@ function slotname(tp::LazyMethod, s::Slot)
     slotnames(tp)[s.id]
 end
 slotname(tp::LazyMethod, s::SSAValue) = Sugar.ssavalue_name(s)
-if v"0.6" < VERSION
+if VERSION < v"0.6.0-dev"
     function method_nargs(f::LazyMethod)
-        m = getmethod(f)
-        m.nargs
+        li = getcodeinfo!(f)
+        li.nargs
     end
     function type_ast(T)
         fields = Expr(:block)
@@ -97,9 +103,10 @@ if v"0.6" < VERSION
     end
 else
     function method_nargs(f::LazyMethod)
-        li = getcodeinfo!(f)
-        li.nargs
+        m = getmethod(f)
+        m.nargs
     end
+
     function type_ast(T)
         fields = Expr(:block)
         expr = Expr(:struct, T.mutable, T, fields)
@@ -149,7 +156,7 @@ end
 rewrite_function(li, f, types, expr) = expr
 
 function rewrite_ast(li, expr)
-    if VERSION < v"0.6.0"
+    if VERSION < v"0.6.0-dev"
         sparams = (Sugar.getcodeinfo!(li).sparam_vals...,)
         if !isempty(sparams)
             expr = first(Sugar.replace_expr(expr) do expr
@@ -188,7 +195,6 @@ function rewrite_ast(li, expr)
                 types = Tuple{map(x-> expr_type(li, x), args[2:end])...}
                 f = resolve_func(li, func)
                 result = rewrite_function(li, f, types, similar_expr(expr, args))
-                push!(li, (f, types))
                 map!(result.args, result.args) do x
                     rewrite_ast(li, x)
                 end
@@ -201,25 +207,75 @@ function rewrite_ast(li, expr)
 end
 
 
-function dependencies!(x::LazyMethod)
+function dependencies!{T}(x::LazyMethod{T}, recursive = false)
     if x.signature == Module
         return []
     end
     if isfunction(x)
-        ast = getast!(x) # make sure it walks the ast, which adds the dependencies
+        MacroTools.prewalk(getast!(x)) do expr
+            if isa(expr, Expr)
+                if expr.head == :call
+                    f = expr.args[1]
+                    types = Tuple{map(arg-> Sugar.expr_type(x, arg), expr.args[2:end])...}
+                    push!(x, (f, types))
+                end
+            end
+            t = Sugar.expr_type(x, expr)
+            if t != Any
+                push!(x, t)
+            end
+            expr
+        end
     else
-        T = x.signature
-        for i in 1:nfields(T)
-            FT = fieldtype(T, i)
-            dep = LazyMethod(FT)
+        t = x.signature
+        for i in 1:nfields(t)
+            FT = fieldtype(t, i)
+            dep = LazyMethod{T}(FT)
             if !(dep in x.dependencies)
                 push!(x, dep)
                 union!(x.dependencies, dependencies!(dep))
             end
         end
     end
+    if recursive # we don't add them to x!!
+        return _dependencies!(x)
+    end
     x.dependencies
 end
+
+function _dependencies!{T}(dep::LazyMethod{T}, visited = LazyMethod{T}(Void), stack = [])
+    Sugar.isintrinsic(dep) && return visited.dependencies
+    if dep in visited.dependencies
+        # when already in deps we need to move it up!
+        delete!(visited.dependencies, dep)
+        push!(visited.dependencies, dep)
+    else
+        push!(visited, dep)
+        try
+            push!(stack, dep.signature)
+            _dependencies!(dependencies!(dep), visited)
+        catch e
+            for elem in stack
+                println("  ", elem)
+            end
+        finally
+            pop!(stack)
+        end
+    end
+    visited.dependencies
+end
+function _dependencies!(deps, visited, stack = [])
+    for dep in copy(deps)
+        if !Sugar.isintrinsic(dep)
+            push!(stack, dep.signature)
+            _dependencies!(dep, visited)
+            pop!(stack)
+        end
+    end
+    visited.dependencies
+end
+
+
 
 function getfuncheader!(x::LazyMethod)
     if !isdefined(x, :funcheader)
@@ -263,12 +319,7 @@ end
 Type of an expression in the context of a LazyMethod
 """
 function expr_type(lm::LazyMethod, x)
-    t = _expr_type(lm, x)
-    # TODO adding dependencies here seems like a bad mix of abstractions!
-    if !isa(t, Module)
-        push!(lm, t) # add as dependency
-    end
-    t
+    _expr_type(lm, x)
 end
 _expr_type(lm, x::Expr) = x.typ
 _expr_type(lm, x::TypedSlot) = x.type
@@ -281,6 +332,7 @@ _expr_type(lm, slot::Union{Slot, SSAValue}) = slottype(lm, slot)
 Takes any value found in the context of a LazyMethod and returns
 A concrete function!
 """
+resolve_func(li, f::AllFuncs) = f
 resolve_func{T}(li, ::Type{T}) = T
 resolve_func(li, f::Union{GlobalRef, Symbol}) = eval(f)
 instance(x) = x.instance

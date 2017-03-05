@@ -41,7 +41,7 @@ end
 function get_slottypename(io::ASTIO, ex)
     typ = isa(ex, TypedSlot) ? ex.typ : Any
     slotid = ex.id
-    li = io.lambdainfo
+    li = getcodeinfo!(io.method)
     #if isa(li, LambdaInfo)
         slottypes = li.slottypes
         if isa(slottypes, Array) && slotid <= length(slottypes::Array)
