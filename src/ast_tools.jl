@@ -24,7 +24,11 @@ function replace_or_drop(f, drop, ast, result = [])
     drop(ast) && return result
     replace, replacement = f(ast)
     if replace
-        push!(result, replacement)
+        if isa(replacement, Tuple)
+            push!(result, replacement...)
+        else
+            push!(result, replacement)
+        end
     else
         expr = if isa(ast, Expr)
             nexpr = similar_expr(ast)
@@ -85,10 +89,11 @@ function extract_func(x::Expr, slots)
     _typed = !isa(typed, Vector) ? Any[typed] : typed
     f, _typed
 end
+
 isa_applytype(x) = false
-function isa_applytype(x::Expr)
-    x.head == :. && x.args[1] == :Core && x.args[2] == QuoteNode(:apply_type)
-end
+# function isa_applytype(x::Expr)
+#     x.head == :. && x.args[1] == :Core && x.args[2] == QuoteNode(:apply_type)
+# end
 function isa_applytype(x::GlobalRef)
     x.mod == Core && x.name == :apply_type
 end
@@ -96,6 +101,7 @@ function isa_applytype(x::Expr)
     x.head == :call || return false
     isa_applytype(x.args[1])
 end
+
 applytype_args(x::Expr) = x.args[2:end]
 
 function applytype_type(x::Expr, args)
@@ -140,7 +146,6 @@ function insert_types(ast::Expr, slot_dict)
                 end
                 types = tuple(map(x-> extract_type(x, slot_dict), typed_args)...)
                 func = get_func(f)
-                @show func types
                 T = return_type(func, types)
                 true, Expr(:(::), Expr(:call, f, typed_args...), T)
             end

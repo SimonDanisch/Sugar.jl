@@ -22,7 +22,9 @@ const AllFuncs = Union{Function, Core.Builtin, Core.IntrinsicFunction}
 const IntrinsicFuncs = Union{Core.Builtin, Core.IntrinsicFunction}
 
 function isfunction(x::LazyMethod)
-    isa(x.signature, Tuple) && length(x.signature) == 2 && isa(x.signature[1], AllFuncs)
+    isa(x.signature, Tuple) &&
+    length(x.signature) == 2 &&
+    (isa(x.signature[1], AllFuncs) || isa(x.signature[1], Type))
 end
 function istype(x::LazyMethod)
     isa(x.signature, DataType)
@@ -109,7 +111,8 @@ else
 
     function type_ast(T)
         fields = Expr(:block)
-        expr = Expr(:struct, T.mutable, T, fields)
+        mutable = T <: Tuple ? false : T.mutable
+        expr = Expr(:struct, mutable, T, fields)
         for name in fieldnames(T)
             FT = fieldtype(T, name)
             push!(fields.args, :($name::$FT))
@@ -140,7 +143,9 @@ function getast!(x::LazyMethod)
                     push!(x.decls, slot)
                     if i > nargs # if not defined in arguments, define in body
                         name = slotname(x, slot)
-                        unshift!(expr.args, :($name::$T))
+                        tmp = :($name::$T)
+                        tmp.typ = T
+                        unshift!(expr.args, tmp)
                     end
                 end
                 expr
@@ -169,21 +174,17 @@ function rewrite_ast(li, expr)
         end
     end
     list = Sugar.replace_expr(expr) do expr
-        if isa(expr, Slot)
-            expr_type(li, expr) # add as dependency
-            return true, expr
-        elseif isa(expr, QuoteNode)
+        if isa(expr, QuoteNode)
             true, expr.value
         elseif isa(expr, Expr)
             args, head = expr.args, expr.head
             if head == :(=)
                 lhs = args[1]
-                name = slotname(li, lhs)
                 rhs = map(x-> rewrite_ast(li, x), args[2:end])
                 res = similar_expr(expr, [lhs, rhs...])
                 if !(lhs in li.decls)
                     push!(li.decls, lhs)
-                    decl = Expr(:(::), name, expr_type(li, lhs))
+                    decl = Expr(:(::), lhs, expr_type(li, lhs))
                     return true, (decl, res) # splice in declaration
                 end
                 return true, res
@@ -208,21 +209,24 @@ end
 
 
 function dependencies!{T}(x::LazyMethod{T}, recursive = false)
-    if x.signature == Module
+    if x.signature in (Module, DataType, Type)
         return []
     end
     if isfunction(x)
         MacroTools.prewalk(getast!(x)) do expr
-            if isa(expr, Expr)
+            if isa(expr, Expr) && expr.head != :block && expr.head != :(=)
                 if expr.head == :call
                     f = expr.args[1]
                     types = Tuple{map(arg-> Sugar.expr_type(x, arg), expr.args[2:end])...}
                     push!(x, (f, types))
+                else
+                    t = Sugar.expr_type(x, expr)
+                    # TODO this could hide problems, but there are some expr untyped which don't matter
+                    # but filtering would need more work!
+                    if t != Any
+                        push!(x, t)
+                    end
                 end
-            end
-            t = Sugar.expr_type(x, expr)
-            if t != Any
-                push!(x, t)
             end
             expr
         end
@@ -238,13 +242,13 @@ function dependencies!{T}(x::LazyMethod{T}, recursive = false)
         end
     end
     if recursive # we don't add them to x!!
-        return _dependencies!(x)
+        deps = x.dependencies
+        return union(deps, _dependencies!(copy(deps), LazyMethod{T}(Void)))
     end
     x.dependencies
 end
 
 function _dependencies!{T}(dep::LazyMethod{T}, visited = LazyMethod{T}(Void), stack = [])
-    Sugar.isintrinsic(dep) && return visited.dependencies
     if dep in visited.dependencies
         # when already in deps we need to move it up!
         delete!(visited.dependencies, dep)
@@ -292,8 +296,7 @@ function getfuncheader!(x::LazyMethod)
     end
     x.funcheader
 end
-
-function getbodysource!(x::LazyMethod)
+function getfuncsource(x::LazyMethod)
     try
         ast, str = get_source(getmethod!(x))
         str
@@ -301,6 +304,18 @@ function getbodysource!(x::LazyMethod)
         sprint() do io
             Base.show_unquoted(io, getast!(x), 0, 0)
         end
+    end
+end
+function gettypesource(x::LazyMethod)
+    sprint() do io
+        dump(io, x.signature)
+    end
+end
+function getbodysource!(x::LazyMethod)
+    if istype(x)
+        gettypesource(x)
+    else
+        getfuncsource(x)
     end
 end
 

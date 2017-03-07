@@ -1,7 +1,3 @@
-is_linenumber(x) = false
-is_linenumber(x::LineNumberNode) = true
-is_linenumber(x::Expr) = x.head == :line
-
 is_call(x) = false
 is_call(x::Expr) = x.head == :call
 
