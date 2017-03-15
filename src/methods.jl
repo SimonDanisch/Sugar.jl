@@ -354,7 +354,11 @@ instance(x) = x.instance
 function resolve_func(li, slot::Slot)
     instance(expr_type(li, slot))
 end
+extract_type{T}(x::Type{T}) = T
 function resolve_func(li, f::Expr)
+    if f.typ <: Type
+        return extract_type(f.typ)
+    end
     try
         # TODO figure out what can go wrong here, since this seems rather fragile
         return eval(f)
