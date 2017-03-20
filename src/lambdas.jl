@@ -46,10 +46,11 @@ end
 const SCodeInfo = VERSION < v"0.6.0-dev" ? LambdaInfo : CodeInfo
 
 # deal with all variances in base that should really be tuples but are something else
-_tuple(x) = (x,)
-_tuple(x::Core.SimpleVector) = tuple(x...)
-_tuple(x::Tuple) = x
-_tuple{T<:Tuple}(x::Type{T}) = tuple(x.parameters...)
+to_tuple(x) = (x,)
+to_tuple(x::Core.SimpleVector) = tuple(x...)
+to_tuple(x::Tuple) = x
+to_tuple(x::AbstractVector) = tuple(x...)
+to_tuple{T<:Tuple}(x::Type{T}) = tuple(x.parameters...)
 
 # typeof working with concrete and types at the same time
 _typeof{T}(x::Type{T}) = Type{T}
@@ -89,8 +90,8 @@ end
 function get_static_parameters(f, types)
     m = get_method(f, types)
     mi = m.specializations.func
-    spnames = map(x->x.name, _tuple(m.tvars))
-    sptypes = _tuple(mi.sparam_vals)
+    spnames = map(x->x.name, to_tuple(m.tvars))
+    sptypes = to_tuple(mi.sparam_vals)
     spnames, sptypes
 end
 

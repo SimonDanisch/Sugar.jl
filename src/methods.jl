@@ -18,6 +18,10 @@ end
 LazyMethod(signature) = LazyMethod{:JL}(signature)
 LazyMethod(f::Function, types::Type) = LazyMethod{:JL}((f, types))
 
+LazyMethod{T}(::LazyMethod{T}, f::Function, types::Type) = LazyMethod{T}((f, types))
+LazyMethod{T}(::LazyMethod{T}, f::Function, types) = LazyMethod{T}((f, Tuple{types...}))
+
+
 const AllFuncs = Union{Function, Core.Builtin, Core.IntrinsicFunction}
 const IntrinsicFuncs = Union{Core.Builtin, Core.IntrinsicFunction}
 
@@ -124,7 +128,9 @@ function getfuncargs(x::LazyMethod)
     sn, st = slotnames(x), slottypes(x)
     n = method_nargs(x)
     map(2:n) do i
-        :($(sn[i])::$(st[i]))
+        expr = :($(sn[i])::$(st[i]))
+        expr.typ = st[i]
+        expr
     end
 end
 
@@ -196,8 +202,10 @@ function rewrite_ast(li, expr)
                 types = Tuple{map(x-> expr_type(li, x), args[2:end])...}
                 f = resolve_func(li, func)
                 result = rewrite_function(li, f, types, similar_expr(expr, args))
-                map!(result.args, result.args) do x
-                    rewrite_ast(li, x)
+                if isa(result, Expr)
+                    map!(result.args, result.args) do x
+                        rewrite_ast(li, x)
+                    end
                 end
                 return true, result
             end
@@ -207,29 +215,32 @@ function rewrite_ast(li, expr)
     first(list)
 end
 
-
+function ast_dependencies!(x, ast)
+    MacroTools.prewalk(ast) do expr
+        if isa(expr, Expr) && expr.head != :block && expr.head != :(=)
+            if expr.head == :call
+                f = expr.args[1]
+                types = Tuple{map(arg-> Sugar.expr_type(x, arg), expr.args[2:end])...}
+                push!(x, (f, types))
+            else
+                t = Sugar.expr_type(x, expr)
+                # TODO this could hide problems, but there are some expr untyped which don't matter
+                # but filtering would need more work!
+                if t != Any
+                    push!(x, t)
+                end
+            end
+        end
+        expr
+    end
+end
 function dependencies!{T}(x::LazyMethod{T}, recursive = false)
     if x.signature in (Module, DataType, Type)
         return []
     end
     if isfunction(x)
-        MacroTools.prewalk(getast!(x)) do expr
-            if isa(expr, Expr) && expr.head != :block && expr.head != :(=)
-                if expr.head == :call
-                    f = expr.args[1]
-                    types = Tuple{map(arg-> Sugar.expr_type(x, arg), expr.args[2:end])...}
-                    push!(x, (f, types))
-                else
-                    t = Sugar.expr_type(x, expr)
-                    # TODO this could hide problems, but there are some expr untyped which don't matter
-                    # but filtering would need more work!
-                    if t != Any
-                        push!(x, t)
-                    end
-                end
-            end
-            expr
-        end
+        ast_dependencies!(x, getast!(x))
+        ast_dependencies!(x, Expr(:block, getfuncargs(x)...))
     else
         t = x.signature
         for i in 1:nfields(t)
@@ -286,7 +297,7 @@ function getfuncheader!(x::LazyMethod)
         x.funcheader = if isfunction(x)
             sprint() do io
                 args = getfuncargs(x)
-                print(io, x.signature[1])
+                show_function(io, x.signature...)
                 Base.show_enclosed_list(io, '(', args, ", ", ')', 0, 0)
                 print(io, "::", returntype(x))
             end
@@ -372,3 +383,12 @@ end
 macro lazymethod(ex0)
     :($(Base.gen_call_with_extracted_types(:LazyMethod, ex0)))
 end
+
+function typename end
+function _typename end
+function functionname end
+function show_name end
+function show_type end
+function show_function end
+
+function supports_overloading end
