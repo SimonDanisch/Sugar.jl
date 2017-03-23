@@ -71,6 +71,7 @@ function getcodeinfo!(x::LazyMethod)
     end
     x.li
 end
+
 if VERSION < v"0.6.0-dev"
     returntype(x::LazyMethod) = getcodeinfo!(x).rettype
 else
