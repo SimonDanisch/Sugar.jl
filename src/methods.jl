@@ -71,9 +71,10 @@ function getcodeinfo!(x::LazyMethod)
     end
     x.li
 end
-
-function returntype(x::LazyMethod)
-    getcodeinfo!(x).rettype
+if VERSION < v"0.6.0-dev"
+    returntype(x::LazyMethod) = getcodeinfo!(x).rettype
+else
+    returntype(x::LazyMethod) = Base.Core.Inference.return_type(x.signature...)
 end
 
 ssatypes(tp::LazyMethod) = getcodeinfo!(tp).ssavaluetypes
@@ -199,7 +200,7 @@ function rewrite_ast(li, expr)
                 if func == GlobalRef(Core, :apply_type)
                     # TODO do something!!
                 end
-                types = Tuple{map(x-> expr_type(li, x), args[2:end])...}
+                types = (map(x-> expr_type(li, x), args[2:end])...)
                 f = resolve_func(li, func)
                 result = rewrite_function(li, f, types, similar_expr(expr, args))
                 if isa(result, Expr)
@@ -392,3 +393,4 @@ function show_type end
 function show_function end
 
 function supports_overloading end
+function vecname end
