@@ -25,30 +25,31 @@ unsupported_expr(message, line) = throw(ExprNotSupported(message, line))
 
 
 get_type(io::ASTIO, x::Expr) = x.typ
+get_type{T}(io::ASTIO, x::Type{T}) = Type{T}
 get_type{T}(io::ASTIO, x::T) = T
 get_type(io::ASTIO, x::GlobalRef) = typeof(eval(x))
 get_type(io::ASTIO, slot::Slot) = get_slottypename(io, slot)[1]
 function get_type(io::ASTIO, slot::SSAValue)
     li = io.lambdainfo
-    if isa(li, LambdaInfo)
-        ssatypes = (li::LambdaInfo).ssavaluetypes
+    #if isa(li, LambdaInfo)
+        ssatypes = li.ssavaluetypes
         return ssatypes[slot.id + 1]
-    end
+    #end
     error("What's up with dat LambdaInfo? $slot, $li")
 end
 
 function get_slottypename(io::ASTIO, ex)
     typ = isa(ex, TypedSlot) ? ex.typ : Any
     slotid = ex.id
-    li = io.lambdainfo
-    if isa(li, LambdaInfo)
-        slottypes = (li::LambdaInfo).slottypes
+    li = getcodeinfo!(io.method)
+    #if isa(li, LambdaInfo)
+        slottypes = li.slottypes
         if isa(slottypes, Array) && slotid <= length(slottypes::Array)
             slottype = slottypes[slotid]
             # The Slot in assignment can somehow have an Any type
             slottype <: typ && (typ = slottype)
         end
-    end
+    #end
     slotnames = io.slotnames
     name = if (isa(slotnames, Vector{String}) &&
         slotid <= length(slotnames::Vector{String}))

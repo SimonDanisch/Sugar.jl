@@ -24,7 +24,11 @@ function replace_or_drop(f, drop, ast, result = [])
     drop(ast) && return result
     replace, replacement = f(ast)
     if replace
-        push!(result, replacement)
+        if isa(replacement, Tuple)
+            push!(result, replacement...)
+        else
+            push!(result, replacement)
+        end
     else
         expr = if isa(ast, Expr)
             nexpr = similar_expr(ast)
@@ -85,10 +89,11 @@ function extract_func(x::Expr, slots)
     _typed = !isa(typed, Vector) ? Any[typed] : typed
     f, _typed
 end
+
 isa_applytype(x) = false
-function isa_applytype(x::Expr)
-    x.head == :. && x.args[1] == :Core && x.args[2] == QuoteNode(:apply_type)
-end
+# function isa_applytype(x::Expr)
+#     x.head == :. && x.args[1] == :Core && x.args[2] == QuoteNode(:apply_type)
+# end
 function isa_applytype(x::GlobalRef)
     x.mod == Core && x.name == :apply_type
 end
@@ -96,6 +101,7 @@ function isa_applytype(x::Expr)
     x.head == :call || return false
     isa_applytype(x.args[1])
 end
+
 applytype_args(x::Expr) = x.args[2:end]
 
 function applytype_type(x::Expr, args)
@@ -140,7 +146,6 @@ function insert_types(ast::Expr, slot_dict)
                 end
                 types = tuple(map(x-> extract_type(x, slot_dict), typed_args)...)
                 func = get_func(f)
-                @show func types
                 T = return_type(func, types)
                 true, Expr(:(::), Expr(:call, f, typed_args...), T)
             end
@@ -168,15 +173,25 @@ _normalize_ast(value) = true, value
 function _normalize_ast(qn::QuoteNode)
     return true, qn.value
 end
+
+function resolve_typ(x::Expr)
+    x.typ.parameters[1]
+end
+resolve_typ(x::GlobalRef) = eval(x)
+
 function _normalize_ast(expr::Expr)
     if expr.head == :invoke
         lam = expr.args[1] # Ignore lambda for now
         res = similar_expr(expr, map(normalize_ast, view(res.args, 2:length(expr.args))))
         return true, res
     elseif expr.head == :new
-        return true, similar_expr(expr, map(normalize_ast, expr.args))
-    elseif expr.head == :static_parameter# TODO do something reasonable with static and meta
-        return true, nothing
+        T = resolve_typ(expr.args[1])
+        expr = Expr(:call, T, map(normalize_ast, expr.args[2:end])...)
+        expr.typ = T
+        return true, expr
+    # elseif expr.head == :static_parameter# TODO do something reasonable with static and meta
+    #     # TODO, can other static parameters beside literal values escape with code_typed, optimization = false?
+    #     return true, expr.args[1]
     elseif expr.head == :meta
         return true, nothing
     elseif expr.head == :call
@@ -184,7 +199,6 @@ function _normalize_ast(expr::Expr)
         if Sugar.isa_applytype(f)
             args = expr.args[2:end]
             T = applytype_type(f, args)
-
             return true, similar_expr(expr, vcat(T, map(normalize_ast, args)))
         end
         return true, similar_expr(expr, map(normalize_ast, expr.args))

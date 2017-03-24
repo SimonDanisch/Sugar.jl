@@ -14,7 +14,12 @@
 
 immutable NoMethodError <: Exception
     func
-    types
+    types::Tuple
+end
+NoMethodError(f, types::Type) = NoMethodError(f, (types.parameters...))
+function Base.showerror(io::IO, e::NoMethodError)
+    args = join(map(t->"::$t", e.types), ", ")
+    print(io, "$(e.func)($args) couldn't be found")
 end
 
 # Give string based stages a type
@@ -37,18 +42,15 @@ function CodeNative(f, types)
     CodeNative(src)
 end
 
-function Base.showerror(io::IO, e::NoMethodError)
-    args = join(map(t->"::$t", e.types), ", ")
-    print(io, "$(e.func)($args) couldn't be found")
-end
 
 const SCodeInfo = VERSION < v"0.6.0-dev" ? LambdaInfo : CodeInfo
 
 # deal with all variances in base that should really be tuples but are something else
-_tuple(x) = (x,)
-_tuple(x::Core.SimpleVector) = tuple(x...)
-_tuple(x::Tuple) = x
-_tuple{T<:Tuple}(x::Type{T}) = tuple(x.parameters...)
+to_tuple(x) = (x,)
+to_tuple(x::Core.SimpleVector) = tuple(x...)
+to_tuple(x::Tuple) = x
+to_tuple(x::AbstractVector) = tuple(x...)
+to_tuple{T<:Tuple}(x::Type{T}) = tuple(x.parameters...)
 
 # typeof working with concrete and types at the same time
 _typeof{T}(x::Type{T}) = Type{T}
@@ -88,19 +90,23 @@ end
 function get_static_parameters(f, types)
     m = get_method(f, types)
     mi = m.specializations.func
-    spnames = map(x->x.name, _tuple(m.tvars))
-    sptypes = _tuple(mi.sparam_vals)
+    spnames = map(x->x.name, to_tuple(m.tvars))
+    sptypes = to_tuple(mi.sparam_vals)
     spnames, sptypes
 end
 
 function get_lambda(pass, f, types, optimize = false)
-    if isa(f, Core.IntrinsicFunction)
+    if isintrinsic(f)
         error("$f is an intrinsic function")
     end
-    lambda = if pass == code_typed
-        pass(f, types, optimize = optimize)
-    else
-        pass(f, types)
+    lambda = try
+        if pass == code_typed
+            pass(f, types, optimize = optimize)
+        else
+            pass(f, types)
+        end
+    catch e
+        error("Couldn't get lambda for $f $types:\n$e")
     end
     if isa(lambda, Vector)
         if isempty(lambda)
@@ -123,15 +129,17 @@ function get_lambda(pass, f, types, optimize = false)
         error("Not sure what's up with returntype of $pass. Returned: $lambda")
     end
 end
-
-function get_method(f, types)
+function get_method(f, types::Type)
+    get_method(f, (types.parameters...))
+end
+function get_method(f, types::Tuple)
     if !all(isleaftype, types)
         error("Not all types are concrete: $types")
     end
     # make sure there is a specialization with precompile
     # TODO, figure out a better way, since this method is not very reliable.
     # (I think, e.g. anonymous functions don't work)
-    precompile(f, types)
+    precompile(f, (types...))
     x = methods(f, types)
     if isempty(x)
         throw(NoMethodError(f, types))
