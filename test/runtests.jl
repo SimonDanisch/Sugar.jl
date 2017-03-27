@@ -1,6 +1,6 @@
-using Sugar
+using Sugar, MacroTools, Base.Test
 using Base.Test
-
+import Sugar: @lazymethod
 
 function controlflow_1(a, b)
     if a == 10
@@ -24,4 +24,91 @@ function controlflow_1(a, b)
     end
 end
 
-Sugar.sugared(controlflow_1, (Int, Int), code_lowered)
+ast = Sugar.sugared(controlflow_1, (Int, Int), code_lowered)
+ast2 = open(deserialize, joinpath(dirname(@__FILE__), "controlflow_1.jls"))
+
+@test ast == ast2
+
+decl = @lazymethod controlflow_1(1, 2)
+
+ast = Sugar.getast!(decl)
+needsnotype = (:block, :if, :(=), :while, :return, :continue, :break)
+@testset "ast rewriting and normalization" begin
+    MacroTools.prewalk(ast) do expr
+        if isa(expr, Expr)
+            if !(expr.head in needsnotype)
+                # there shouldn't be any untyped expressions in the AST
+                @test expr.typ != Any
+            end
+            if expr.head == :call
+                f = expr.args[1]
+                # all function calls should get replaced by the real function
+                @test isa(f, Function)
+            end
+        end
+        expr
+    end
+end
+@testset "method dependencies" begin
+    deps = Sugar.dependencies!(decl, true)
+    @test length(deps) == 23
+    deps_test = [
+        Int64,
+        (==,Tuple{Int64,Int64}),
+        UnitRange{Int64},
+        (colon,Tuple{Int64,Int64}),
+        (start,Tuple{UnitRange{Int64}}),
+        (!, Tuple{Bool}),
+        (done,Tuple{UnitRange{Int64},Int64}),
+        Tuple{Int64,Int64},
+        (next,Tuple{UnitRange{Int64},Int64}),
+        (getfield,Tuple{Tuple{Int64,Int64},Int64}),
+        (+,Tuple{Int64,Int64}),
+        (-,Tuple{Int64,Int64}),
+        (UnitRange{Int64},Tuple{Int64,Int64}),
+        (Base.unitrange_last,Tuple{Int64,Int64}),
+        (ifelse,Tuple{Bool,Int64,Int64}),
+        (>=,Tuple{Int64,Int64}),
+        (<=,Tuple{Int64,Int64}),
+        (one,Tuple{Int64}),
+        Type{Int64},
+        Bool,
+        (oftype,Tuple{Int64,Int64}),
+        (convert,Tuple{Type{Int64},Int64}),
+        (one,Tuple{Type{Int64}})
+    ]
+    @test all(x-> x.signature in deps_test, deps)
+    funcs = [
+        (==,Tuple{Int64,Int64}),
+        (colon,Tuple{Int64,Int64}),
+        (start,Tuple{UnitRange{Int64}}),
+        (!, Tuple{Bool}),
+        (done,Tuple{UnitRange{Int64},Int64}),
+        (next,Tuple{UnitRange{Int64},Int64}),
+        (getfield,Tuple{Tuple{Int64,Int64},Int64}),
+        (+,Tuple{Int64,Int64}),
+        (-,Tuple{Int64,Int64}),
+        (UnitRange{Int64},Tuple{Int64,Int64}),
+        (Base.unitrange_last,Tuple{Int64,Int64}),
+        (ifelse,Tuple{Bool,Int64,Int64}),
+        (>=,Tuple{Int64,Int64}),
+        (<=,Tuple{Int64,Int64}),
+        (one,Tuple{Int64}),
+        (oftype,Tuple{Int64,Int64}),
+        (convert,Tuple{Type{Int64},Int64}),
+        (one,Tuple{Type{Int64}})
+    ]
+    funcdeps = filter(Sugar.isfunction, deps)
+    @test length(funcdeps) == length(funcs)
+    @test all(x-> x.signature in funcs, funcdeps)
+    types = [
+        Int64,
+        UnitRange{Int64},
+        Tuple{Int64,Int64},
+        Type{Int64},
+        Bool,
+    ]
+    typedeps = filter(Sugar.istype, deps)
+    @test length(typedeps) == length(types)
+    @test all(x-> x.signature in types, typedeps)
+end
