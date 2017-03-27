@@ -156,6 +156,7 @@ function getast!(x::LazyMethod)
                         unshift!(expr.args, tmp)
                     end
                 end
+                expr.typ = returntype(x)
                 expr
             end
         else
@@ -166,7 +167,10 @@ function getast!(x::LazyMethod)
     x.ast
 end
 
-rewrite_function(li, f, types, expr) = expr
+function rewrite_function(li, f, types, expr)
+    expr.args[1] = f
+    expr
+end
 
 function rewrite_ast(li, expr)
     if VERSION < v"0.6.0-dev"
@@ -180,6 +184,16 @@ function rewrite_ast(li, expr)
                 end
             end)
         end
+    else
+        expr = first(Sugar.replace_expr(expr) do expr
+            if isa(expr, Expr) && expr.head == :static_parameter
+                # TODO, this can't possible work with vals. Let's hope, Julia
+                # doesn't put them as static_parameter nodes into the AST in that case!
+                true, sparams[expr.args[1]]
+            else
+                false, expr
+            end
+        end)
     end
     list = Sugar.replace_expr(expr) do expr
         if isa(expr, QuoteNode)
@@ -192,7 +206,9 @@ function rewrite_ast(li, expr)
                 res = similar_expr(expr, [lhs, rhs...])
                 if !(lhs in li.decls)
                     push!(li.decls, lhs)
-                    decl = Expr(:(::), lhs, expr_type(li, lhs))
+                    T = expr_type(li, lhs)
+                    decl = Expr(:(::), lhs, T)
+                    decl.typ = T
                     return true, (decl, res) # splice in declaration
                 end
                 return true, res
@@ -352,6 +368,7 @@ end
 _expr_type(lm, x::Expr) = x.typ
 _expr_type(lm, x::TypedSlot) = x.type
 _expr_type(lm, x::GlobalRef) = typeof(eval(x))
+_expr_type{T}(lm, x::Type{T}) = Type{T}
 _expr_type{T}(lm, x::T) = T
 _expr_type(lm, slot::Union{Slot, SSAValue}) = slottype(lm, slot)
 
