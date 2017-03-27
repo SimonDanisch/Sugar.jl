@@ -1,3 +1,11 @@
+for pkg in ("Matcha",)
+    installed = try
+        Pkg.installed(pkg) != nothing
+    catch e
+        false
+    end
+    installed || Pkg.clone("https://github.com/SimonDanisch/$(pkg).jl.git")
+end
 using Sugar, MacroTools, Base.Test
 using Base.Test
 import Sugar: @lazymethod
