@@ -17,7 +17,7 @@ function controlflow_1(a, b)
         else
             8
         end
-        for i=1:100
+        for i = 1:100
             x += i
             x -= 77
             if i == 77
@@ -64,66 +64,115 @@ needsnotype = (:block, :if, :(=), :while, :return, :continue, :break)
         expr
     end
 end
-@testset "method dependencies" begin
-    deps = Sugar.dependencies!(decl, true)
-    @test length(deps) == 23
-    deps_test = [
-        Int64,
-        (==,Tuple{Int64,Int64}),
-        UnitRange{Int64},
-        (colon,Tuple{Int64,Int64}),
-        (start,Tuple{UnitRange{Int64}}),
-        (!, Tuple{Bool}),
-        (done,Tuple{UnitRange{Int64},Int64}),
-        Tuple{Int64,Int64},
-        (next,Tuple{UnitRange{Int64},Int64}),
-        (getfield,Tuple{Tuple{Int64,Int64},Int64}),
-        (+,Tuple{Int64,Int64}),
-        (-,Tuple{Int64,Int64}),
-        (UnitRange{Int64},Tuple{Int64,Int64}),
-        (Base.unitrange_last,Tuple{Int64,Int64}),
-        (ifelse,Tuple{Bool,Int64,Int64}),
-        (>=,Tuple{Int64,Int64}),
-        (<=,Tuple{Int64,Int64}),
-        (one,Tuple{Int64}),
-        Type{Int64},
-        Bool,
-        (oftype,Tuple{Int64,Int64}),
-        (convert,Tuple{Type{Int64},Int64}),
-        (one,Tuple{Type{Int64}})
-    ]
-    @test all(x-> x.signature in deps_test, deps)
-    funcs = [
-        (==,Tuple{Int64,Int64}),
-        (colon,Tuple{Int64,Int64}),
-        (start,Tuple{UnitRange{Int64}}),
-        (!, Tuple{Bool}),
-        (done,Tuple{UnitRange{Int64},Int64}),
-        (next,Tuple{UnitRange{Int64},Int64}),
-        (getfield,Tuple{Tuple{Int64,Int64},Int64}),
-        (+,Tuple{Int64,Int64}),
-        (-,Tuple{Int64,Int64}),
-        (UnitRange{Int64},Tuple{Int64,Int64}),
-        (Base.unitrange_last,Tuple{Int64,Int64}),
-        (ifelse,Tuple{Bool,Int64,Int64}),
-        (>=,Tuple{Int64,Int64}),
-        (<=,Tuple{Int64,Int64}),
-        (one,Tuple{Int64}),
-        (oftype,Tuple{Int64,Int64}),
-        (convert,Tuple{Type{Int64},Int64}),
-        (one,Tuple{Type{Int64}})
-    ]
-    funcdeps = filter(Sugar.isfunction, deps)
-    @test length(funcdeps) == length(funcs)
-    @test all(x-> x.signature in funcs, funcdeps)
-    types = [
-        Int64,
-        UnitRange{Int64},
-        Tuple{Int64,Int64},
-        Type{Int64},
-        Bool,
-    ]
-    typedeps = filter(Sugar.istype, deps)
-    @test length(typedeps) == length(types)
-    @test all(x-> x.signature in types, typedeps)
+# The dependencies and implementation on 0.6 have changed quite a bit...
+# TODO add a `pure` example, which doesn't rely on implementations of base!
+
+if VERSION < v"0.6.0-dev"
+    @testset "method dependencies" begin
+        deps = Sugar.dependencies!(decl, true)
+        @test length(deps) == 23
+        deps_test = [
+            Int64,
+            (==,Tuple{Int64,Int64}),
+            UnitRange{Int64},
+            (colon,Tuple{Int64,Int64}),
+            (start,Tuple{UnitRange{Int64}}),
+            (!, Tuple{Bool}),
+            (done,Tuple{UnitRange{Int64},Int64}),
+            Tuple{Int64,Int64},
+            (next,Tuple{UnitRange{Int64},Int64}),
+            (getfield,Tuple{Tuple{Int64,Int64},Int64}),
+            (+,Tuple{Int64,Int64}),
+            (-,Tuple{Int64,Int64}),
+            (UnitRange{Int64},Tuple{Int64,Int64}),
+            (Base.unitrange_last,Tuple{Int64,Int64}),
+            (ifelse,Tuple{Bool,Int64,Int64}),
+            (>=,Tuple{Int64,Int64}),
+            (<=,Tuple{Int64,Int64}),
+            (one,Tuple{Int64}),
+            Type{Int64},
+            Bool,
+            (oftype,Tuple{Int64,Int64}),
+            (convert,Tuple{Type{Int64},Int64}),
+            (one,Tuple{Type{Int64}})
+        ]
+        @test all(x-> x.signature in deps_test, deps)
+        funcs = [
+            (==,Tuple{Int64,Int64}),
+            (colon,Tuple{Int64,Int64}),
+            (start,Tuple{UnitRange{Int64}}),
+            (!, Tuple{Bool}),
+            (done,Tuple{UnitRange{Int64},Int64}),
+            (next,Tuple{UnitRange{Int64},Int64}),
+            (getfield,Tuple{Tuple{Int64,Int64},Int64}),
+            (+,Tuple{Int64,Int64}),
+            (-,Tuple{Int64,Int64}),
+            (UnitRange{Int64},Tuple{Int64,Int64}),
+            (Base.unitrange_last,Tuple{Int64,Int64}),
+            (ifelse,Tuple{Bool,Int64,Int64}),
+            (>=,Tuple{Int64,Int64}),
+            (<=,Tuple{Int64,Int64}),
+            (one,Tuple{Int64}),
+            (oftype,Tuple{Int64,Int64}),
+            (convert,Tuple{Type{Int64},Int64}),
+            (one,Tuple{Type{Int64}})
+        ]
+        funcdeps = filter(Sugar.isfunction, deps)
+        @test length(funcdeps) == length(funcs)
+        @test all(x-> x.signature in funcs, funcdeps)
+        types = [
+            Int64,
+            UnitRange{Int64},
+            Tuple{Int64,Int64},
+            Type{Int64},
+            Bool,
+        ]
+        typedeps = filter(Sugar.istype, deps)
+        @test length(typedeps) == length(types)
+        @test all(x-> x.signature in types, typedeps)
+    end
+else
+    @testset "method dependencies" begin
+        deps = Sugar.dependencies!(decl, true)
+        deps_test = [
+            Int64,
+            (==, Tuple{Int64,Int64}),
+            UnitRange{Int64},
+            (colon, Tuple{Int64,Int64}),
+            (start, Tuple{UnitRange{Int64}}),
+            (!, Tuple{Bool}),
+            (done, Tuple{UnitRange{Int64},Int64}),
+            Tuple{Int64,Int64},
+            (next, Tuple{UnitRange{Int64},Int64}),
+            (getfield, Tuple{Tuple{Int64,Int64},Int64}),
+            (+, Tuple{Int64,Int64}),
+            (-, Tuple{Int64,Int64}),
+            Bool,
+        ]
+        @test length(deps_test) == length(deps)
+        @test all(x-> x.signature in deps_test, deps)
+        funcs = [
+            (==, Tuple{Int64,Int64}),
+            (colon, Tuple{Int64,Int64}),
+            (start, Tuple{UnitRange{Int64}}),
+            (!, Tuple{Bool}),
+            (done, Tuple{UnitRange{Int64},Int64}),
+            (next, Tuple{UnitRange{Int64},Int64}),
+            (getfield, Tuple{Tuple{Int64,Int64},Int64}),
+            (+, Tuple{Int64,Int64}),
+            (-, Tuple{Int64,Int64}),
+        ]
+        funcdeps = filter(Sugar.isfunction, deps)
+        @test length(funcdeps) == length(funcs)
+        @test all(x-> x.signature in funcs, funcdeps)
+        types = [
+            Int64,
+            UnitRange{Int64},
+            Tuple{Int64,Int64},
+            Bool,
+        ]
+        typedeps = filter(Sugar.istype, deps)
+        @test length(typedeps) == length(types)
+        @test all(x-> x.signature in types, typedeps)
+    end
 end
