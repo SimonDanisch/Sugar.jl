@@ -43,7 +43,13 @@ function CodeNative(f, types)
 end
 
 
-const SCodeInfo = VERSION < v"0.6.0-dev" ? LambdaInfo : CodeInfo
+const SCodeInfo = if isdefined(:LambdaInfo)
+    LambdaInfo
+elseif isdefined(:CodeInfo)
+    CodeInfo
+else
+    error("Unsupported Julia Version")
+end
 
 # deal with all variances in base that should really be tuples but are something else
 to_tuple(x) = (x,)
