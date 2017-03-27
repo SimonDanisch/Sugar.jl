@@ -33,7 +33,14 @@ function controlflow_1(a, b)
 end
 
 ast = Sugar.sugared(controlflow_1, (Int, Int), code_lowered)
-ast2 = open(deserialize, joinpath(dirname(@__FILE__), "controlflow_1.jls"))
+
+# serialization doesn't work between julia versions,
+# and it'd be annoying to rely on e.g. JLD/JSON (maybe reasonable, though)
+ast2 = if VERSION < v"0.6.0-dev"
+    open(deserialize, joinpath(dirname(@__FILE__), "controlflow_05.jls"))
+else
+    open(deserialize, joinpath(dirname(@__FILE__), "controlflow_06.jls"))
+end
 
 @test ast == ast2
 
