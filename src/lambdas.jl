@@ -65,9 +65,9 @@ _typeof{T}(x::T) = T
 jlhome() = ccall(:jl_get_julia_home, Any, ())
 
 function juliabasepath(file)
-  srcdir = joinpath(jlhome(),"..","..","base")
-  releasedir = joinpath(jlhome(),"..","share","julia","base")
-  normpath(joinpath(isdir(srcdir) ? srcdir : releasedir, file))
+    srcdir = joinpath(jlhome(),"..","..","base")
+    releasedir = joinpath(jlhome(),"..","share","julia","base")
+    normpath(joinpath(isdir(srcdir) ? srcdir : releasedir, file))
 end
 
 function get_source_file(path::AbstractString, ln)

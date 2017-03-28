@@ -72,7 +72,7 @@ function getcodeinfo!(x::LazyMethod)
     x.li
 end
 
-if VERSION < v"0.6.0-dev"
+if isdefined(Base, :LambdaInfo)
     returntype(x::LazyMethod) = getcodeinfo!(x).rettype
 else
     returntype(x::LazyMethod) = Base.Core.Inference.return_type(x.signature...)
@@ -95,7 +95,7 @@ function slotname(tp::LazyMethod, s::Slot)
     slotnames(tp)[s.id]
 end
 slotname(tp::LazyMethod, s::SSAValue) = Sugar.ssavalue_name(s)
-if VERSION < v"0.6.0-dev"
+if isdefined(Base, :LambdaInfo)
     function method_nargs(f::LazyMethod)
         li = getcodeinfo!(f)
         li.nargs
@@ -126,6 +126,8 @@ else
         expr
     end
 end
+
+
 function getfuncargs(x::LazyMethod)
     sn, st = slotnames(x), slottypes(x)
     n = method_nargs(x)
@@ -173,7 +175,7 @@ function rewrite_function(li, f, types, expr)
 end
 type_type{T}(x::Type{Type{T}}) = T
 function rewrite_ast(li, expr)
-    if VERSION < v"0.6.0-dev"
+    if isdefined(Base, :LambdaInfo)
         sparams = (Sugar.getcodeinfo!(li).sparam_vals...,)
         if !isempty(sparams)
             expr = first(Sugar.replace_expr(expr) do expr
