@@ -59,6 +59,7 @@ Base.hash(x::LazyMethod, h::UInt64) = hash(x.signature, h)
 function Base.show(io::IO, mt::MIME"text/plain", x::LazyMethod)
     show(io, mt, x.signature)
 end
+
 function getmethod(x::LazyMethod)
     if !isdefined(x, :method)
         x.method = Sugar.get_method(x.signature...)
@@ -70,12 +71,6 @@ function getcodeinfo!(x::LazyMethod)
         x.li = Sugar.get_lambda(code_typed, x.signature...)
     end
     x.li
-end
-
-if isdefined(Base, :LambdaInfo)
-    returntype(x::LazyMethod) = getcodeinfo!(x).rettype
-else
-    returntype(x::LazyMethod) = Base.Core.Inference.return_type(x.signature...)
 end
 
 ssatypes(tp::LazyMethod) = getcodeinfo!(tp).ssavaluetypes
@@ -96,6 +91,7 @@ function slotname(tp::LazyMethod, s::Slot)
 end
 slotname(tp::LazyMethod, s::SSAValue) = Sugar.ssavalue_name(s)
 if isdefined(Base, :LambdaInfo)
+    returntype(x::LazyMethod) = getcodeinfo!(x).rettype
     function method_nargs(f::LazyMethod)
         li = getcodeinfo!(f)
         li.nargs
@@ -110,11 +106,11 @@ if isdefined(Base, :LambdaInfo)
         expr
     end
 else
+    returntype(x::LazyMethod) = Base.Core.Inference.return_type(x.signature...)
     function method_nargs(f::LazyMethod)
         m = getmethod(f)
         m.nargs
     end
-
     function type_ast(T)
         fields = Expr(:block)
         mutable = T <: Tuple ? false : T.mutable
@@ -311,8 +307,6 @@ function _dependencies!(deps, visited, stack = [])
     visited.dependencies
 end
 
-
-
 function getfuncheader!(x::LazyMethod)
     if !isdefined(x, :funcheader)
         x.funcheader = if isfunction(x)
@@ -328,6 +322,7 @@ function getfuncheader!(x::LazyMethod)
     end
     x.funcheader
 end
+
 function getfuncsource(x::LazyMethod)
     try
         ast, str = get_source(getmethod!(x))
@@ -338,11 +333,13 @@ function getfuncsource(x::LazyMethod)
         end
     end
 end
+
 function gettypesource(x::LazyMethod)
     sprint() do io
         dump(io, x.signature)
     end
 end
+
 function getbodysource!(x::LazyMethod)
     if istype(x)
         gettypesource(x)
@@ -375,6 +372,7 @@ _expr_type{T}(lm, x::Type{T}) = Type{T}
 _expr_type{T}(lm, x::T) = T
 _expr_type(lm, slot::Union{Slot, SSAValue}) = slottype(lm, slot)
 
+instance(x) = x.instance
 
 """
 Takes any value found in the context of a LazyMethod and returns
@@ -383,10 +381,10 @@ A concrete function!
 resolve_func(li, f::AllFuncs) = f
 resolve_func{T}(li, ::Type{T}) = T
 resolve_func(li, f::Union{GlobalRef, Symbol}) = eval(f)
-instance(x) = x.instance
 function resolve_func(li, slot::Slot)
     instance(expr_type(li, slot))
 end
+
 extract_type{T}(x::Type{T}) = T
 function resolve_func(li, f::Expr)
     if f.typ <: Type
@@ -401,11 +399,14 @@ function resolve_func(li, f::Expr)
     end
     error("$f not a callable")
 end
-
+"""
+Like @code_typed, but will create a lazymethod!
+"""
 macro lazymethod(ex0)
     :($(Base.gen_call_with_extracted_types(:LazyMethod, ex0)))
 end
 
+# interface for transpilers
 function typename end
 function _typename end
 function functionname end

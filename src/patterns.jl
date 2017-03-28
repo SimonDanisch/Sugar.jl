@@ -59,5 +59,4 @@ llvm_function_call = r"(.*) = call (.*) @(.*)\(.*\)"
 
 ##########################
 # Assembly string patterns
-
 assembly_source_line = r"Source line: ([1-9][0-9]+)"
