@@ -1,17 +1,3 @@
-# TODO create RIchMethod type, from which one can lazily query all kind of
-# information e.g.:
-# lowered/typed/llvm/native,
-# benchmarks, contains SIMD/Boundchecks
-# args, argnames etc
-# type RichMethod
-#     static_parameters
-#     variables
-#     arguments
-#     macro_form
-#     lowered_form
-#     typed_form
-# end
-
 immutable NoMethodError <: Exception
     func
     types::Tuple
@@ -65,9 +51,9 @@ _typeof{T}(x::T) = T
 jlhome() = ccall(:jl_get_julia_home, Any, ())
 
 function juliabasepath(file)
-  srcdir = joinpath(jlhome(),"..","..","base")
-  releasedir = joinpath(jlhome(),"..","share","julia","base")
-  normpath(joinpath(isdir(srcdir) ? srcdir : releasedir, file))
+    srcdir = joinpath(jlhome(),"..","..","base")
+    releasedir = joinpath(jlhome(),"..","share","julia","base")
+    normpath(joinpath(isdir(srcdir) ? srcdir : releasedir, file))
 end
 
 function get_source_file(path::AbstractString, ln)
@@ -208,6 +194,7 @@ function slot_vector(lam_typed)
     ssaslot = [(SSAValue(i-1), ("ssa_$(i-1)", t)) for (i,t) in enumerate(lam_typed.ssavaluetypes)]
     vcat(slots, ssaslot)
 end
+
 function slot_dictionary(lam_typed)
     slots = slot_vector(lam_typed)
     s_dict = Dict()
@@ -220,6 +207,9 @@ function slot_dictionary(lam_typed)
     s_dict
 end
 
+"""
+Returns an AST most similar to what you would get from a macro
+"""
 function macro_form(f, types)
     method = get_method(f, types)
     local code::Expr; local str::String
@@ -254,7 +244,6 @@ function return_type(f, types)
         Union{x...}
     end
 end
-
 
 
 function clean_form(f, types)

@@ -1,3 +1,4 @@
+using Base: is_linenumber
 
 """
 Replaces `goto` statements in a loop body with continue and break.
@@ -43,7 +44,9 @@ function remove_goto(ast)
     ast
 end
 
-
+"""
+Sugared, normalized AST, which basically decompiles the expr list returned by e.g code_typed
+"""
 function sugared(f, types, stage = code_lowered)
     ast = get_ast(stage, f, types)
     ast = normalize_ast(ast)
