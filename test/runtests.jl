@@ -147,7 +147,19 @@ else
             (getfield, Tuple{Tuple{Int64,Int64},Int64}),
             (+, Tuple{Int64,Int64}),
             (-, Tuple{Int64,Int64}),
+            (UnitRange{Int64}, Tuple{Int64,Int64}),
+            (Base.unitrange_last, Tuple{Int64,Int64}),
+            (ifelse, Tuple{Bool,Int64,Int64}),
+            (>=, Tuple{Int64,Int64}),
+            (<=, Tuple{Int64,Int64}),
+            (oneunit, Tuple{Int64}),
+            (one, Tuple{Int64}),
+            (Int64, Tuple{Int64}),
+            (one, Tuple{Type{Int64}}),
             Bool,
+            (oftype, Tuple{Int64,Int64}),
+            (convert, Tuple{Type{Int64},Int64}),
+            (oneunit, Tuple{Type{Int64}}),
         ]
         @test length(deps_test) == length(deps)
         @test all(x-> x.signature in deps_test, deps)
@@ -161,6 +173,18 @@ else
             (getfield, Tuple{Tuple{Int64,Int64},Int64}),
             (+, Tuple{Int64,Int64}),
             (-, Tuple{Int64,Int64}),
+            (UnitRange{Int64}, Tuple{Int64,Int64}),
+            (Base.unitrange_last, Tuple{Int64,Int64}),
+            (ifelse, Tuple{Bool,Int64,Int64}),
+            (>=, Tuple{Int64,Int64}),
+            (<=, Tuple{Int64,Int64}),
+            (oneunit, Tuple{Int64}),
+            (one, Tuple{Int64}),
+            (Int64, Tuple{Int64}),
+            (one, Tuple{Type{Int64}}),
+            (oftype, Tuple{Int64,Int64}),
+            (convert, Tuple{Type{Int64},Int64}),
+            (oneunit, Tuple{Type{Int64}}),
         ]
         funcdeps = filter(Sugar.isfunction, deps)
         @test length(funcdeps) == length(funcs)
@@ -169,7 +193,7 @@ else
             Int64,
             UnitRange{Int64},
             Tuple{Int64,Int64},
-            Bool,
+            Bool
         ]
         typedeps = filter(Sugar.istype, deps)
         @test length(typedeps) == length(types)

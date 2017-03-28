@@ -171,7 +171,7 @@ function rewrite_function(li, f, types, expr)
     expr.args[1] = f
     expr
 end
-
+type_type{T}(x::Type{Type{T}}) = T
 function rewrite_ast(li, expr)
     if VERSION < v"0.6.0-dev"
         sparams = (Sugar.getcodeinfo!(li).sparam_vals...,)
@@ -189,7 +189,8 @@ function rewrite_ast(li, expr)
             if isa(expr, Expr) && expr.head == :static_parameter
                 # TODO, this can't possible work with vals. Let's hope, Julia
                 # doesn't put them as static_parameter nodes into the AST in that case!
-                true, sparams[expr.args[1]]
+                @assert expr.typ <: Type
+                true, type_type(expr.typ)
             else
                 false, expr
             end
