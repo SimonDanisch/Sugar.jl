@@ -189,7 +189,7 @@ function rewrite_ast(li, expr)
             if isa(expr, Expr) && expr.head == :static_parameter
                 # TODO, this can't possible work with vals. Let's hope, Julia
                 # doesn't put them as static_parameter nodes into the AST in that case!
-                true, sparams[expr.args[1]]
+                true, expr.typ
             else
                 false, expr
             end
