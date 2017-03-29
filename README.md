@@ -79,6 +79,5 @@ More documentation for other functionality will follow!
 Installation:
 
 ```Julia
-Pkg.clone("https://github.com/SimonDanisch/Matcha.jl.git")
-Pkg.clone("https://github.com/SimonDanisch/Sugar.jl.git")
+Pkg.add("Sugar")
 ```
