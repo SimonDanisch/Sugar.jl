@@ -175,6 +175,7 @@ if isdefined(Base, :LambdaInfo)
     end
 else
     function get_static_parameters(lm::LazyMethod)
+        # TODO is this the correct way to get static parameters?! It seems to work at least
         world = typemax(UInt)
         x = first(Base._methods(lm.signature..., -1, world))
         to_tuple(x[2])
