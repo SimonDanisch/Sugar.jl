@@ -170,31 +170,32 @@ function rewrite_function(li, f, types, expr)
     expr
 end
 type_type{T}(x::Type{Type{T}}) = T
-function rewrite_ast(li, expr)
-    if isdefined(Base, :LambdaInfo)
-        sparams = (Sugar.getcodeinfo!(li).sparam_vals...,)
-        if !isempty(sparams)
-            expr = first(Sugar.replace_expr(expr) do expr
-                if isa(expr, Expr) && expr.head == :static_parameter
-                    true, sparams[expr.args[1]]
-                else
-                    false, expr
-                end
-            end)
+if isdefined(Base, :LambdaInfo)
+    function get_static_parameters(lm::LazyMethod)
+        to_tuple(getcodeinfo!(lm).sparam_vals)
+    end
+else
+    function get_static_parameters(lm::LazyMethod)
+        mi = getmethod(lm).specializations
+        try
+            to_tuple(mi.func.sparam_vals)
+        catch e
+            println("UHEHEHE ", fieldnames(mi))
         end
-    else
-        expr = first(Sugar.replace_expr(expr) do expr
+    end
+end
+function rewrite_ast(li, expr)
+    sparams = get_static_parameters(li)
+    if !isempty(sparams)
+        expr = first(replace_expr(expr) do expr
             if isa(expr, Expr) && expr.head == :static_parameter
-                # TODO, this can't possible work with vals. Let's hope, Julia
-                # doesn't put them as static_parameter nodes into the AST in that case!
-                @assert expr.typ <: Type
-                true, type_type(expr.typ)
+                true, sparams[expr.args[1]]
             else
                 false, expr
             end
         end)
     end
-    list = Sugar.replace_expr(expr) do expr
+    list = replace_expr(expr) do expr
         if isa(expr, QuoteNode)
             true, expr.value
         elseif isa(expr, Expr)
