@@ -1,6 +1,6 @@
 module Sugar
 
-using Matcha, MacroTools, DataStructures
+using Matcha, MacroTools, DataStructures, Compat
 
 # All kind of patterns for regex/matcha. Contains also matching isa functions
 include("patterns.jl")

@@ -60,7 +60,7 @@ function Base.show(io::IO, mt::MIME"text/plain", x::LazyMethod)
     show(io, mt, x.signature)
 end
 
-function getmethod(x::LazyMethod)
+function getmethod!(x::LazyMethod)
     if !isdefined(x, :method)
         x.method = Sugar.get_method(x.signature...)
     end
@@ -108,7 +108,7 @@ if isdefined(Base, :LambdaInfo)
 else
     returntype(x::LazyMethod) = Base.Core.Inference.return_type(x.signature...)
     function method_nargs(f::LazyMethod)
-        m = getmethod(f)
+        m = getmethod!(f)
         m.nargs
     end
     function type_ast(T)
@@ -176,11 +176,17 @@ if isdefined(Base, :LambdaInfo)
     end
 else
     function get_static_parameters(lm::LazyMethod)
-        mi = getmethod(lm).specializations
+        mi = getmethod!(lm)
         try
-            to_tuple(mi.func.sparam_vals)
+            if isempty(mi.sparam_syms)
+                return ()
+            else
+                # TODO this seems a bit flacky, need to figure out a better way on 0.6!
+                to_tuple(mi.specializations.func.sparam_vals)
+            end
         catch e
-            println("UHEHEHE ", fieldnames(mi))
+            println(STDERR, "couldn't get static parameters for $(lm.signature)")
+            rethrow(e)
         end
     end
 end
