@@ -12,7 +12,7 @@ type LazyMethod{T}
     ast::Expr
     source::String
     funcheader::String
-    LazyMethod(signature, cache = Dict()) = new{T}(signature, cache, OrderedSet(), OrderedSet{LazyMethod}())
+    (::Type{LazyMethod{T}})(signature, cache = Dict()) = new{T}(signature, cache, OrderedSet(), OrderedSet{LazyMethod}())
 end
 
 LazyMethod(signature) = LazyMethod{:JL}(signature)
