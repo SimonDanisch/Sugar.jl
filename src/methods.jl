@@ -18,8 +18,7 @@ end
 LazyMethod(signature) = LazyMethod{:JL}(signature)
 LazyMethod(f::Function, types::Type) = LazyMethod{:JL}((f, types))
 
-LazyMethod{T}(::LazyMethod{T}, f::Function, types::Type) = LazyMethod{T}((f, types))
-LazyMethod{T}(::LazyMethod{T}, f::Function, types) = LazyMethod{T}((f, Tuple{types...}))
+LazyMethod{T}(::LazyMethod{T}, f::Function, types) = LazyMethod{T}((f, Base.to_tuple_type(types)))
 
 
 const AllFuncs = Union{Function, Core.Builtin, Core.IntrinsicFunction}
@@ -176,18 +175,9 @@ if isdefined(Base, :LambdaInfo)
     end
 else
     function get_static_parameters(lm::LazyMethod)
-        mi = getmethod!(lm)
-        try
-            if isempty(mi.sparam_syms)
-                return ()
-            else
-                # TODO this seems a bit flacky, need to figure out a better way on 0.6!
-                to_tuple(mi.specializations.func.sparam_vals)
-            end
-        catch e
-            println(STDERR, "couldn't get static parameters for $(lm.signature)")
-            rethrow(e)
-        end
+        world = typemax(UInt)
+        x = first(Base._methods(lm.signature..., -1, world))
+        to_tuple(x[2])
     end
 end
 function rewrite_ast(li, expr)
