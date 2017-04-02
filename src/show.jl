@@ -1,6 +1,6 @@
 # Helper for writing an AST to a string! Extended by e.g. Transpiler!
 
-abstract ASTIO <: IO
+@compat abstract type ASTIO <: IO end
 
 Base.print(io::ASTIO, args...) = print(io.io, args...)
 Base.print(io::ASTIO, arg::String) = print(io.io, arg)

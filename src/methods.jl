@@ -18,8 +18,7 @@ end
 LazyMethod(signature) = LazyMethod{:JL}(signature)
 LazyMethod(f::Function, types::Type) = LazyMethod{:JL}((f, types))
 
-LazyMethod{T}(::LazyMethod{T}, f::Function, types::Type) = LazyMethod{T}((f, types))
-LazyMethod{T}(::LazyMethod{T}, f::Function, types) = LazyMethod{T}((f, Tuple{types...}))
+LazyMethod{T}(::LazyMethod{T}, f::Function, types) = LazyMethod{T}((f, Base.to_tuple_type(types)))
 
 
 const AllFuncs = Union{Function, Core.Builtin, Core.IntrinsicFunction}
@@ -60,7 +59,7 @@ function Base.show(io::IO, mt::MIME"text/plain", x::LazyMethod)
     show(io, mt, x.signature)
 end
 
-function getmethod(x::LazyMethod)
+function getmethod!(x::LazyMethod)
     if !isdefined(x, :method)
         x.method = Sugar.get_method(x.signature...)
     end
@@ -108,7 +107,7 @@ if isdefined(Base, :LambdaInfo)
 else
     returntype(x::LazyMethod) = Base.Core.Inference.return_type(x.signature...)
     function method_nargs(f::LazyMethod)
-        m = getmethod(f)
+        m = getmethod!(f)
         m.nargs
     end
     function type_ast(T)
@@ -170,31 +169,30 @@ function rewrite_function(li, f, types, expr)
     expr
 end
 type_type{T}(x::Type{Type{T}}) = T
+if isdefined(Base, :LambdaInfo)
+    function get_static_parameters(lm::LazyMethod)
+        to_tuple(getcodeinfo!(lm).sparam_vals)
+    end
+else
+    function get_static_parameters(lm::LazyMethod)
+        # TODO is this the correct way to get static parameters?! It seems to work at least
+        world = typemax(UInt)
+        x = first(Base._methods(lm.signature..., -1, world))
+        to_tuple(x[2])
+    end
+end
 function rewrite_ast(li, expr)
-    if isdefined(Base, :LambdaInfo)
-        sparams = (Sugar.getcodeinfo!(li).sparam_vals...,)
-        if !isempty(sparams)
-            expr = first(Sugar.replace_expr(expr) do expr
-                if isa(expr, Expr) && expr.head == :static_parameter
-                    true, sparams[expr.args[1]]
-                else
-                    false, expr
-                end
-            end)
-        end
-    else
-        expr = first(Sugar.replace_expr(expr) do expr
+    sparams = get_static_parameters(li)
+    if !isempty(sparams)
+        expr = first(replace_expr(expr) do expr
             if isa(expr, Expr) && expr.head == :static_parameter
-                # TODO, this can't possible work with vals. Let's hope, Julia
-                # doesn't put them as static_parameter nodes into the AST in that case!
-                @assert expr.typ <: Type
-                true, type_type(expr.typ)
+                true, sparams[expr.args[1]]
             else
                 false, expr
             end
         end)
     end
-    list = Sugar.replace_expr(expr) do expr
+    list = replace_expr(expr) do expr
         if isa(expr, QuoteNode)
             true, expr.value
         elseif isa(expr, Expr)
