@@ -28,7 +28,9 @@ function replace_or_drop(f, drop, ast, result = [])
     replace, replacement = f(ast)
     if replace
         if isa(replacement, Tuple)
-            push!(result, replacement...)
+            if !isempty(replacement)
+                push!(result, replacement...)
+            end
         else
             push!(result, replacement)
         end

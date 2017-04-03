@@ -193,8 +193,16 @@ function rewrite_ast(li, expr)
         end)
     end
     list = replace_expr(expr) do expr
-        if isa(expr, QuoteNode)
-            true, expr.value
+        if isa(expr, NewvarNode)
+            # slot = expr.slot
+            # T = slottype(li, slot)
+            # res = Expr(:(::), slotname(li, slot), T)
+            # res.typ = T
+            # seems like newvarnodes are redundant with the way we pre define
+            # slots, so we can drop them here! # TODO is this true?
+            return true, ()
+        elseif isa(expr, QuoteNode)
+            return true, expr.value
         elseif isa(expr, Expr)
             args, head = expr.args, expr.head
             if head == :(=)
@@ -364,7 +372,7 @@ function expr_type(lm::LazyMethod, x)
     _expr_type(lm, x)
 end
 _expr_type(lm, x::Expr) = x.typ
-_expr_type(lm, x::TypedSlot) = x.type
+_expr_type(lm, x::TypedSlot) = x.typ
 _expr_type(lm, x::GlobalRef) = typeof(eval(x))
 _expr_type{T}(lm, x::Type{T}) = Type{T}
 _expr_type{T}(lm, x::T) = T
