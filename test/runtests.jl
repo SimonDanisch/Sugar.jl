@@ -148,6 +148,7 @@ else
             (one, Tuple{Int64}),
             (Int64, Tuple{Int64}),
             (one, Tuple{Type{Int64}}),
+            Type{Int64},
             Bool,
             (oftype, Tuple{Int64,Int64}),
             (convert, Tuple{Type{Int64},Int64}),
@@ -185,6 +186,7 @@ else
             Int64,
             UnitRange{Int64},
             Tuple{Int64,Int64},
+            Type{Int64},
             Bool
         ]
         typedeps = filter(Sugar.istype, deps)
