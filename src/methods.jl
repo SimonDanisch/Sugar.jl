@@ -121,11 +121,11 @@ end
 
 
 function getfuncargs(x::LazyMethod)
-    sn, st = slotnames(x), slottypes(x)
+    sn, st = slotnames(x), Sugar.to_tuple(x.signature[2])
     n = method_nargs(x)
     map(2:n) do i
-        expr = :($(sn[i])::$(st[i]))
-        expr.typ = st[i]
+        expr = :($(sn[i])::$(st[i-1]))
+        expr.typ = st[i-1]
         expr
     end
 end
