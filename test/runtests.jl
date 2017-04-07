@@ -25,7 +25,6 @@ function controlflow_1(a, b)
 end
 
 ast = Sugar.sugared(controlflow_1, (Int, Int), code_lowered)
-
 # serialization doesn't work between julia versions,
 # and it'd be annoying to rely on e.g. JLD/JSON (maybe reasonable, though)
 ast2 = if VERSION < v"0.6.0-dev"
@@ -39,7 +38,7 @@ end
 decl = @lazymethod controlflow_1(1, 2)
 
 ast = Sugar.getast!(decl)
-needsnotype = (:block, :if, :(=), :while, :return, :continue, :break)
+needsnotype = (:block, :if, :(=), :while, :return, :continue, :break, :for, :(:))
 @testset "ast rewriting and normalization" begin
     MacroTools.prewalk(ast) do expr
         if isa(expr, Expr)
@@ -58,137 +57,91 @@ needsnotype = (:block, :if, :(=), :while, :return, :continue, :break)
 end
 # The dependencies and implementation on 0.6 have changed quite a bit...
 # TODO add a `pure` example, which doesn't rely on implementations of base!
+deps = Sugar.dependencies!(decl, true)
+@testset "method dependencies" begin
+    deps = Sugar.dependencies!(decl, true)
+    deps_test = [
+        Int,
+        (==,Tuple{Int64,Int64}),
+        (+,Tuple{Int,Int}),
+        (-,Tuple{Int,Int}),
+    ]
+    @test length(deps) == length(deps_test)
+    @test all(x-> x.signature in deps_test, deps)
+    funcs = [
+        (==,Tuple{Int64,Int64}),
+        (+,Tuple{Int, Int}),
+        (-,Tuple{Int, Int}),
+    ]
+    funcdeps = filter(Sugar.isfunction, deps)
+    @test length(funcdeps) == length(funcs)
+    @test all(x-> x.signature in funcs, funcdeps)
+    types = [
+        Int64,
+    ]
+    typedeps = filter(Sugar.istype, deps)
+    @test length(typedeps) == length(types)
+    @test all(x-> x.signature in types, typedeps)
+end
 
-if VERSION < v"0.6.0-dev"
-    @testset "method dependencies" begin
-        deps = Sugar.dependencies!(decl, true)
-        @test length(deps) == 23
-        deps_test = [
-            Int64,
-            (==,Tuple{Int64,Int64}),
-            UnitRange{Int64},
-            (colon,Tuple{Int64,Int64}),
-            (start,Tuple{UnitRange{Int64}}),
-            (!, Tuple{Bool}),
-            (done,Tuple{UnitRange{Int64},Int64}),
-            Tuple{Int64,Int64},
-            (next,Tuple{UnitRange{Int64},Int64}),
-            (getfield,Tuple{Tuple{Int64,Int64},Int64}),
-            (+,Tuple{Int64,Int64}),
-            (-,Tuple{Int64,Int64}),
-            (UnitRange{Int64},Tuple{Int64,Int64}),
-            (Base.unitrange_last,Tuple{Int64,Int64}),
-            (ifelse,Tuple{Bool,Int64,Int64}),
-            (>=,Tuple{Int64,Int64}),
-            (<=,Tuple{Int64,Int64}),
-            (one,Tuple{Int64}),
-            Type{Int64},
-            Bool,
-            (oftype,Tuple{Int64,Int64}),
-            (convert,Tuple{Type{Int64},Int64}),
-            (one,Tuple{Type{Int64}})
-        ]
-        @test all(x-> x.signature in deps_test, deps)
-        funcs = [
-            (==,Tuple{Int64,Int64}),
-            (colon,Tuple{Int64,Int64}),
-            (start,Tuple{UnitRange{Int64}}),
-            (!, Tuple{Bool}),
-            (done,Tuple{UnitRange{Int64},Int64}),
-            (next,Tuple{UnitRange{Int64},Int64}),
-            (getfield,Tuple{Tuple{Int64,Int64},Int64}),
-            (+,Tuple{Int64,Int64}),
-            (-,Tuple{Int64,Int64}),
-            (UnitRange{Int64},Tuple{Int64,Int64}),
-            (Base.unitrange_last,Tuple{Int64,Int64}),
-            (ifelse,Tuple{Bool,Int64,Int64}),
-            (>=,Tuple{Int64,Int64}),
-            (<=,Tuple{Int64,Int64}),
-            (one,Tuple{Int64}),
-            (oftype,Tuple{Int64,Int64}),
-            (convert,Tuple{Type{Int64},Int64}),
-            (one,Tuple{Type{Int64}})
-        ]
-        funcdeps = filter(Sugar.isfunction, deps)
-        @test length(funcdeps) == length(funcs)
-        @test all(x-> x.signature in funcs, funcdeps)
-        types = [
-            Int64,
-            UnitRange{Int64},
-            Tuple{Int64,Int64},
-            Type{Int64},
-            Bool,
-        ]
-        typedeps = filter(Sugar.istype, deps)
-        @test length(typedeps) == length(types)
-        @test all(x-> x.signature in types, typedeps)
+function fortest(x)
+    acc = x
+    for i = 1:5
+        if i == 1
+            acc += x
+        elseif i == 2
+            acc -= x
+        else
+            acc += x * x
+        end
     end
-else
-    @testset "method dependencies" begin
-        deps = Sugar.dependencies!(decl, true)
-        deps_test = [
-            Int64,
-            (==, Tuple{Int64,Int64}),
-            UnitRange{Int64},
-            (colon, Tuple{Int64,Int64}),
-            (start, Tuple{UnitRange{Int64}}),
-            (!, Tuple{Bool}),
-            (done, Tuple{UnitRange{Int64},Int64}),
-            Tuple{Int64,Int64},
-            (next, Tuple{UnitRange{Int64},Int64}),
-            (getfield, Tuple{Tuple{Int64,Int64},Int64}),
-            (+, Tuple{Int64,Int64}),
-            (-, Tuple{Int64,Int64}),
-            (UnitRange{Int64}, Tuple{Int64,Int64}),
-            (Base.unitrange_last, Tuple{Int64,Int64}),
-            (ifelse, Tuple{Bool,Int64,Int64}),
-            (>=, Tuple{Int64,Int64}),
-            (<=, Tuple{Int64,Int64}),
-            (oneunit, Tuple{Int64}),
-            (one, Tuple{Int64}),
-            (Int64, Tuple{Int64}),
-            (one, Tuple{Type{Int64}}),
-            Bool,
-            (oftype, Tuple{Int64,Int64}),
-            (convert, Tuple{Type{Int64},Int64}),
-            (oneunit, Tuple{Type{Int64}}),
-        ]
-        @test length(deps_test) == length(deps)
-        @test all(x-> x.signature in deps_test, deps)
-        funcs = [
-            (==, Tuple{Int64,Int64}),
-            (colon, Tuple{Int64,Int64}),
-            (start, Tuple{UnitRange{Int64}}),
-            (!, Tuple{Bool}),
-            (done, Tuple{UnitRange{Int64},Int64}),
-            (next, Tuple{UnitRange{Int64},Int64}),
-            (getfield, Tuple{Tuple{Int64,Int64},Int64}),
-            (+, Tuple{Int64,Int64}),
-            (-, Tuple{Int64,Int64}),
-            (UnitRange{Int64}, Tuple{Int64,Int64}),
-            (Base.unitrange_last, Tuple{Int64,Int64}),
-            (ifelse, Tuple{Bool,Int64,Int64}),
-            (>=, Tuple{Int64,Int64}),
-            (<=, Tuple{Int64,Int64}),
-            (oneunit, Tuple{Int64}),
-            (one, Tuple{Int64}),
-            (Int64, Tuple{Int64}),
-            (one, Tuple{Type{Int64}}),
-            (oftype, Tuple{Int64,Int64}),
-            (convert, Tuple{Type{Int64},Int64}),
-            (oneunit, Tuple{Type{Int64}}),
-        ]
-        funcdeps = filter(Sugar.isfunction, deps)
-        @test length(funcdeps) == length(funcs)
-        @test all(x-> x.signature in funcs, funcdeps)
-        types = [
-            Int64,
-            UnitRange{Int64},
-            Tuple{Int64,Int64},
-            Bool
-        ]
-        typedeps = filter(Sugar.istype, deps)
-        @test length(typedeps) == length(types)
-        @test all(x-> x.signature in types, typedeps)
-    end
+    return acc
+end
+
+decl = Sugar.@lazymethod fortest(1f0)
+ast = Sugar.getast!(decl)
+function typed_expr(head, typ, args...)
+    expr = Expr(head, args...)
+    expr.typ = typ
+    expr
+end
+ast_target = []
+push!(ast_target, typed_expr(:(::), Int, :i, Int))
+push!(ast_target, typed_expr(:(::), Int, :xxtempx4, Int))
+push!(ast_target, typed_expr(:(::), Float32, :acc, Float32))
+push!(ast_target, :($(SlotNumber(3)) = $(SlotNumber(2))))
+for_loop = Expr(:for)
+
+push!(for_loop.args, :($(SlotNumber(4)) = 1:5))
+forbody = Expr(:block)
+push!(for_loop.args, forbody)
+# if else
+call = typed_expr(:call, Float32, +, SlotNumber(3), SlotNumber(2))
+firstif = Expr(:if,
+    typed_expr(:call, Bool, ==, SlotNumber(5), 1),
+    Expr(:block,
+        :($(SlotNumber(3)) = $call),
+        Expr(:continue)
+    )
+)
+push!(forbody.args, firstif)
+call = typed_expr(:call, Float32, -, SlotNumber(3), SlotNumber(2))
+secondif = Expr(:if,
+    typed_expr(:call, Bool, ==, SlotNumber(5), 2),
+    Expr(:block,
+        :($(SlotNumber(3)) = $call),
+        Expr(:continue)
+    )
+)
+push!(forbody.args, secondif)
+call1 = typed_expr(:call, Float32, *, SlotNumber(2), SlotNumber(2))
+call = typed_expr(:call, Float32, +, SlotNumber(3), call1)
+push!(forbody.args, :($(SlotNumber(3)) = $call))
+
+push!(ast_target, for_loop)
+push!(ast_target, :(return $(SlotNumber(3))))
+target_expr = typed_expr(:block, Float32, ast_target...)
+
+@testset "for + ifelse" begin
+    @test target_expr == ast
 end
