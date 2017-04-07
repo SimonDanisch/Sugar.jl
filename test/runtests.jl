@@ -111,12 +111,18 @@ function typed_expr(head, typ, args...)
     expr.typ = typ
     expr
 end
-
-sloti, slotx, slotacc = SlotNumber(5), SlotNumber(2), SlotNumber(3)
 ast_target = []
 push!(ast_target, typed_expr(:(::), Int, :i, Int))
 push!(ast_target, typed_expr(:(::), Int, :xxtempx4, Int))
 push!(ast_target, typed_expr(:(::), Float32, :acc, Float32))
+sloti, slotx, slotacc = if VERSION < v"0.6.0-dev"
+    SlotNumber(5), SlotNumber(2), SlotNumber(3)
+else
+    # slotnumbers seem to have changed.. besides in testing, this shouldn't be a problem!
+    reverse!(ast_target)
+    SlotNumber(3), SlotNumber(2), SlotNumber(5)
+end
+
 push!(ast_target, :($slotacc = $slotx))
 for_loop = Expr(:for)
 
