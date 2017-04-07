@@ -25,6 +25,9 @@ function controlflow_1(a, b)
 end
 
 ast = Sugar.sugared(controlflow_1, (Int, Int), code_lowered)
+# open(joinpath(dirname(@__FILE__), "controlflow_05.jls"), "w") do io
+#     serialize(io, ast)
+# end
 # serialization doesn't work between julia versions,
 # and it'd be annoying to rely on e.g. JLD/JSON (maybe reasonable, though)
 ast2 = if VERSION < v"0.6.0-dev"
@@ -44,6 +47,9 @@ needsnotype = (:block, :if, :(=), :while, :return, :continue, :break, :for, :(:)
         if isa(expr, Expr)
             if !(expr.head in needsnotype)
                 # there shouldn't be any untyped expressions in the AST
+                if expr.typ == Any
+                    show(expr.head)
+                end
                 @test expr.typ != Any
             end
             if expr.head == :call
@@ -105,41 +111,43 @@ function typed_expr(head, typ, args...)
     expr.typ = typ
     expr
 end
+
+sloti, slotx, slotacc = SlotNumber(5), SlotNumber(2), SlotNumber(3)
 ast_target = []
 push!(ast_target, typed_expr(:(::), Int, :i, Int))
 push!(ast_target, typed_expr(:(::), Int, :xxtempx4, Int))
 push!(ast_target, typed_expr(:(::), Float32, :acc, Float32))
-push!(ast_target, :($(SlotNumber(3)) = $(SlotNumber(2))))
+push!(ast_target, :($slotacc = $slotx))
 for_loop = Expr(:for)
 
-push!(for_loop.args, :($(SlotNumber(4)) = 1:5))
+push!(for_loop.args, :($sloti = 1:5))
 forbody = Expr(:block)
 push!(for_loop.args, forbody)
 # if else
-call = typed_expr(:call, Float32, +, SlotNumber(3), SlotNumber(2))
+call = typed_expr(:call, Float32, +, slotacc, slotx)
 firstif = Expr(:if,
-    typed_expr(:call, Bool, ==, SlotNumber(5), 1),
+    typed_expr(:call, Bool, ==, sloti, 1),
     Expr(:block,
-        :($(SlotNumber(3)) = $call),
+        :($(slotacc) = $call),
         Expr(:continue)
     )
 )
 push!(forbody.args, firstif)
-call = typed_expr(:call, Float32, -, SlotNumber(3), SlotNumber(2))
+call = typed_expr(:call, Float32, -, slotacc, slotx)
 secondif = Expr(:if,
-    typed_expr(:call, Bool, ==, SlotNumber(5), 2),
+    typed_expr(:call, Bool, ==, sloti, 2),
     Expr(:block,
-        :($(SlotNumber(3)) = $call),
+        :($(slotacc) = $call),
         Expr(:continue)
     )
 )
 push!(forbody.args, secondif)
-call1 = typed_expr(:call, Float32, *, SlotNumber(2), SlotNumber(2))
-call = typed_expr(:call, Float32, +, SlotNumber(3), call1)
-push!(forbody.args, :($(SlotNumber(3)) = $call))
+call1 = typed_expr(:call, Float32, *, slotx, slotx)
+call = typed_expr(:call, Float32, +, slotacc, call1)
+push!(forbody.args, :($(slotacc) = $call))
 
 push!(ast_target, for_loop)
-push!(ast_target, :(return $(SlotNumber(3))))
+push!(ast_target, :(return $(slotacc)))
 target_expr = typed_expr(:block, Float32, ast_target...)
 
 @testset "for + ifelse" begin

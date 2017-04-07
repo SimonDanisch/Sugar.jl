@@ -25,7 +25,7 @@ function remove_goto(ast)
             goto, break_label
         colonargs = colon[1].args[2].args
         from, to = colonargs[2], colonargs[3]
-        index = start[1].args[1]
+
         condition = unless[1].args[1]
         body = replace_continue_break(collect(body), continue_label[1], break_label[1])
         push!(body, continue_label[1])
@@ -37,7 +37,12 @@ function remove_goto(ast)
         # remove getfield of next unitrange
         nextslot = next[1].args[1]
         elem, i = first(body), Base.start(body)
+        index = start[1].args[1] # this is index tmp, but might be a good default
         while !Base.done(body, i) && isgetfield(elem, nextslot)
+            next_tuple_idx = elem.args[2].args[3]
+            if next_tuple_idx == 1 # should be first element
+                index = elem.args[1] # this is our real index
+            end
             shift!(body)
             elem, _ = Base.next(body, i)
         end
