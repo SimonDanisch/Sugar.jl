@@ -21,9 +21,6 @@ LazyMethod(f::Function, types::Type) = LazyMethod{:JL}((f, types))
 LazyMethod{T}(::LazyMethod{T}, f::Function, types) = LazyMethod{T}((f, Base.to_tuple_type(types)))
 
 
-const AllFuncs = Union{Function, Core.Builtin, Core.IntrinsicFunction}
-const IntrinsicFuncs = Union{Core.Builtin, Core.IntrinsicFunction}
-
 function isfunction(x::LazyMethod)
     isa(x.signature, Tuple) &&
     length(x.signature) == 2 &&
@@ -124,11 +121,11 @@ end
 
 
 function getfuncargs(x::LazyMethod)
-    sn, st = slotnames(x), slottypes(x)
+    sn, st = slotnames(x), Sugar.to_tuple(x.signature[2])
     n = method_nargs(x)
     map(2:n) do i
-        expr = :($(sn[i])::$(st[i]))
-        expr.typ = st[i]
+        expr = :($(sn[i])::$(st[i-1]))
+        expr.typ = st[i-1]
         expr
     end
 end
@@ -379,6 +376,7 @@ _expr_type{T}(lm, x::T) = T
 _expr_type(lm, slot::Union{Slot, SSAValue}) = slottype(lm, slot)
 
 instance(x) = x.instance
+extract_type{T}(x::Type{T}) = T
 
 """
 Takes any value found in the context of a LazyMethod and returns
@@ -388,10 +386,13 @@ resolve_func(li, f::AllFuncs) = f
 resolve_func{T}(li, ::Type{T}) = T
 resolve_func(li, f::Union{GlobalRef, Symbol}) = eval(f)
 function resolve_func(li, slot::Slot)
-    instance(expr_type(li, slot))
+    try
+        instance(expr_type(li, slot))
+    catch e
+        println(expr_type(li, slot))
+        rethrow(e)
+    end
 end
-
-extract_type{T}(x::Type{T}) = T
 function resolve_func(li, f::Expr)
     if f.typ <: Type
         return extract_type(f.typ)
