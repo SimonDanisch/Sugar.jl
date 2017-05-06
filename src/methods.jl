@@ -18,7 +18,7 @@ end
 LazyMethod(signature) = LazyMethod{:JL}(signature)
 LazyMethod(f::Function, types::Type) = LazyMethod{:JL}((f, types))
 
-LazyMethod{T}(::LazyMethod{T}, f::Function, types) = LazyMethod{T}((f, Base.to_tuple_type(types)))
+LazyMethod{T}(lm::LazyMethod{T}, f::Function, types) = LazyMethod{T}((f, Base.to_tuple_type(types)), lm.cache)
 
 
 function isfunction(x::LazyMethod)
@@ -86,6 +86,7 @@ function slotname(tp::LazyMethod, s::Slot)
     slotnames(tp)[s.id]
 end
 slotname(tp::LazyMethod, s::SSAValue) = Sugar.ssavalue_name(s)
+
 if isdefined(Base, :LambdaInfo)
     returntype(x::LazyMethod) = getcodeinfo!(x).rettype
     function method_nargs(f::LazyMethod)
@@ -246,65 +247,52 @@ function ast_dependencies!(x, ast)
                 t = Sugar.expr_type(x, expr)
                 # TODO this could hide problems, but there are some expr untyped which don't matter
                 # but filtering would need more work!
-                if t != Any
-                    push!(x, t)
-                end
+                t != Any && push!(x, t)
             end
         end
         expr
     end
 end
 function dependencies!{T}(x::LazyMethod{T}, recursive = false)
-    if x.signature in (Module, DataType, Type)
-        return []
-    end
+    # skip types with no dependencies (shouldn't actually even be in here)
+    x.signature in (Module, DataType, Type) && return []
     if isfunction(x)
         ast_dependencies!(x, getast!(x))
         ast_dependencies!(x, Expr(:block, getfuncargs(x)...))
     else
         t = x.signature
-        for i in 1:nfields(t)
+        set = OrderedSet()
+        for i in 1:nfields(t) # add all fields
             FT = fieldtype(t, i)
-            dep = LazyMethod{T}(FT)
-            if !(dep in x.dependencies)
-                push!(x, dep)
-                union!(x.dependencies, dependencies!(dep))
-            end
+            dep = LazyMethod{T}(FT, x.cache)
+            push!(set, dep)
         end
+        union!(x.dependencies, set)
     end
     if recursive # we don't add them to x!!
         deps = x.dependencies
-        return union(deps, _dependencies!(copy(deps), LazyMethod{T}(Void)))
+        return union(deps, _dependencies!(copy(deps), LazyMethod{T}(Void, x.cache)))
     end
     x.dependencies
 end
 
-function _dependencies!{T}(dep::LazyMethod{T}, visited = LazyMethod{T}(Void), stack = [])
+function _dependencies!{T}(dep::LazyMethod{T}, visited = LazyMethod{T}(Void))
     if dep in visited.dependencies
         # when already in deps we need to move it up!
         delete!(visited.dependencies, dep)
         push!(visited.dependencies, dep)
     else
         push!(visited, dep)
-        try
-            push!(stack, dep.signature)
+        if !isintrinsic(dep)
             _dependencies!(dependencies!(dep), visited)
-        catch e
-            for elem in stack
-                println("  ", elem)
-            end
-        finally
-            pop!(stack)
         end
     end
     visited.dependencies
 end
-function _dependencies!(deps, visited, stack = [])
+function _dependencies!(deps, visited)
     for dep in copy(deps)
         if !Sugar.isintrinsic(dep)
-            push!(stack, dep.signature)
             _dependencies!(dep, visited)
-            pop!(stack)
         end
     end
     visited.dependencies
@@ -396,6 +384,9 @@ end
 function resolve_func(li, f::Expr)
     if f.typ <: Type
         return extract_type(f.typ)
+    end
+    if f.typ <: AllFuncs
+        return instance(f.typ)
     end
     try
         # TODO figure out what can go wrong here, since this seems rather fragile
