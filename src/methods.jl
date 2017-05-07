@@ -247,7 +247,11 @@ function ast_dependencies!(x, ast)
                 t = Sugar.expr_type(x, expr)
                 # TODO this could hide problems, but there are some expr untyped which don't matter
                 # but filtering would need more work!
-                t != Any && push!(x, t)
+                if isleaftype(t)
+                    push!(x, t)
+                else
+                    warn("Found abstract type: $t in expr $expr")
+                end
             end
         end
         expr
@@ -377,7 +381,8 @@ function resolve_func(li, slot::Slot)
     try
         instance(expr_type(li, slot))
     catch e
-        println(expr_type(li, slot))
+        println(slot)
+        println(slotname(li, slot))
         rethrow(e)
     end
 end
