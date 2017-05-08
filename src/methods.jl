@@ -7,7 +7,7 @@ type LazyMethod{T}
     cache
     decls::OrderedSet
     dependencies::OrderedSet{LazyMethod}
-    li
+    m
     method
     ast::Expr
     source::String
@@ -63,14 +63,15 @@ function getmethod!(x::LazyMethod)
     x.method
 end
 function getcodeinfo!(x::LazyMethod)
-    if !isdefined(x, :li)
-        x.li = Sugar.get_lambda(code_typed, x.signature...)
+    if !isdefined(x, :m)
+        x.m = Sugar.get_lambda(code_typed, x.signature...)
     end
-    x.li
+    x.m
 end
 
 ssatypes(tp::LazyMethod) = getcodeinfo!(tp).ssavaluetypes
 slottypes(tp::LazyMethod) = getcodeinfo!(tp).slottypes
+slottype(tp::LazyMethod, s::TypedSlot) = s.typ
 slottype(tp::LazyMethod, s::Slot) = slottypes(tp)[s.id]
 slottype(tp::LazyMethod, s::SSAValue) = ssatypes(tp)[s.id + 1]
 function slotnames(tp::LazyMethod)
@@ -83,15 +84,20 @@ function slotnames(tp::LazyMethod)
     end
 end
 function slotname(tp::LazyMethod, s::Slot)
-    slotnames(tp)[s.id]
+    snames = slotnames(tp)
+    if s.id <= length(snames)
+        snames[s.id]
+    else
+        Symbol("slot_$(s.id)")
+    end
 end
 slotname(tp::LazyMethod, s::SSAValue) = Sugar.ssavalue_name(s)
 
 if isdefined(Base, :LambdaInfo)
     returntype(x::LazyMethod) = getcodeinfo!(x).rettype
     function method_nargs(f::LazyMethod)
-        li = getcodeinfo!(f)
-        li.nargs
+        m = getcodeinfo!(f)
+        m.nargs
     end
     function type_ast(T)
         fields = Expr(:block)
@@ -162,9 +168,34 @@ function getast!(x::LazyMethod)
     x.ast
 end
 
-function rewrite_function(li, f, types, expr)
+function rewrite_function(m, f, types, expr)
     expr.args[1] = f
     expr
+end
+function rewrite_apply(m, types, expr)
+    apply_args = expr.args[2:end]
+    if types[1] <: AllFuncs && all(x-> x <: Tuple, types[2:end])
+        to_apply = instance(types[1])
+        argtuple = apply_args[2:end]
+        tuple_len = length(argtuple)
+        # assign to tmp, in case it's  not a variable and instead a constructor expression
+        tmp_exprs = []; args = []
+        for i = 1:tuple_len
+            arg = rewrite_ast(m, argtuple[i])
+            T = types[i + 1]
+            ttup = to_tuple(T)
+            tuplen = length(ttup)
+            for j = 1:tuplen
+                # TODO, assign tuple to a tmp variable?
+                expr = :($arg[$j])
+                expr.typ = ttup[j]
+                push!(args, expr)
+            end
+        end
+        typed_expr(expr.typ, :call, to_apply, args...)
+    else
+        error("Unknown _apply construct. Found: $expr")
+    end
 end
 type_type{T}(x::Type{Type{T}}) = T
 if isdefined(Base, :LambdaInfo)
@@ -179,8 +210,8 @@ else
         to_tuple(x[2])
     end
 end
-function rewrite_ast(li, expr)
-    sparams = get_static_parameters(li)
+function rewrite_ast(m, expr)
+    sparams = get_static_parameters(m)
     if !isempty(sparams)
         expr = first(replace_expr(expr) do expr
             if isa(expr, Expr) && expr.head == :static_parameter
@@ -193,8 +224,8 @@ function rewrite_ast(li, expr)
     list = replace_expr(expr) do expr
         if isa(expr, NewvarNode)
             # slot = expr.slot
-            # T = slottype(li, slot)
-            # res = Expr(:(::), slotname(li, slot), T)
+            # T = slottype(m, slot)
+            # res = Expr(:(::), slotname(m, slot), T)
             # res.typ = T
             # seems like newvarnodes are redundant with the way we pre define
             # slots, so we can drop them here! # TODO is this true?
@@ -205,11 +236,11 @@ function rewrite_ast(li, expr)
             args, head = expr.args, expr.head
             if head == :(=)
                 lhs = args[1]
-                rhs = map(x-> rewrite_ast(li, x), args[2:end])
+                rhs = map(x-> rewrite_ast(m, x), args[2:end])
                 res = similar_expr(expr, [lhs, rhs...])
-                if !(lhs in li.decls)
-                    push!(li.decls, lhs)
-                    T = expr_type(li, lhs)
+                if !(lhs in m.decls)
+                    push!(m.decls, lhs)
+                    T = expr_type(m, lhs)
                     decl = Expr(:(::), lhs, T)
                     decl.typ = T
                     return true, (decl, res) # splice in declaration
@@ -220,12 +251,15 @@ function rewrite_ast(li, expr)
                 if func == GlobalRef(Core, :apply_type)
                     # TODO do something!!
                 end
-                types = (map(x-> expr_type(li, x), args[2:end])...)
-                f = resolve_func(li, func)
-                result = rewrite_function(li, f, types, similar_expr(expr, args))
+                types = (map(x-> expr_type(m, x), args[2:end])...)
+                f = resolve_func(m, func)
+                if f == Core._apply
+                    return true, rewrite_apply(m, types, expr)
+                end
+                result = rewrite_function(m, f, types, similar_expr(expr, args))
                 if isa(result, Expr)
                     map!(result.args, result.args) do x
-                        rewrite_ast(li, x)
+                        rewrite_ast(m, x)
                     end
                 end
                 return true, result
@@ -258,6 +292,7 @@ function ast_dependencies!(x, ast)
     end
 end
 function dependencies!{T}(x::LazyMethod{T}, recursive = false)
+    println("   dep: ", x.signature)
     # skip types with no dependencies (shouldn't actually even be in here)
     x.signature in (Module, DataType, Type) && return []
     if isfunction(x)
@@ -281,6 +316,7 @@ function dependencies!{T}(x::LazyMethod{T}, recursive = false)
 end
 
 function _dependencies!{T}(dep::LazyMethod{T}, visited = LazyMethod{T}(Void))
+    println("   _dep: ", dep.signature)
     if dep in visited.dependencies
         # when already in deps we need to move it up!
         delete!(visited.dependencies, dep)
@@ -374,19 +410,19 @@ extract_type{T}(x::Type{T}) = T
 Takes any value found in the context of a LazyMethod and returns
 A concrete function!
 """
-resolve_func(li, f::AllFuncs) = f
-resolve_func{T}(li, ::Type{T}) = T
-resolve_func(li, f::Union{GlobalRef, Symbol}) = eval(f)
-function resolve_func(li, slot::Slot)
+resolve_func(m, f::AllFuncs) = f
+resolve_func{T}(m, ::Type{T}) = T
+resolve_func(m, f::Union{GlobalRef, Symbol}) = eval(f)
+function resolve_func(m, slot::Union{Slot, SSAValue})
     try
-        instance(expr_type(li, slot))
+        instance(expr_type(m, slot))
     catch e
         println(slot)
-        println(slotname(li, slot))
+        println(slotname(m, slot))
         rethrow(e)
     end
 end
-function resolve_func(li, f::Expr)
+function resolve_func(m, f::Expr)
     if f.typ <: Type
         return extract_type(f.typ)
     end
