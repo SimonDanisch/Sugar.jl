@@ -27,7 +27,7 @@ function remove_goto(ast)
         from, to = colonargs[2], colonargs[3]
 
         condition = unless[1].args[1]
-        body = replace_continue_break(collect(body), continue_label[1], break_label[1])
+        body = Any[replace_continue_break(collect(body), continue_label[1], break_label[1])...]
         push!(body, continue_label[1])
         body = remove_goto(body)
         # TODO, I guess this will never be removed anyways, so we could just always pop it
