@@ -23,6 +23,7 @@ function remove_goto(ast)
         # a goto that is directly next to its label can be removed!
         label[1]
     end
+
     ast = matchreplace(ast, for_pattern) do colon,
             start, loop_label, unless,
             next, body, continue_label,

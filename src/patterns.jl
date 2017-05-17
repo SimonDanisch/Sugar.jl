@@ -30,6 +30,7 @@ function is_unless_goto(goto, hist, histpos)
     unless = hist[histpos][1]
     goto.label == unless.args[2]
 end
+
 save_resolve_func(x) = nothing
 save_resolve_func(f::AllFuncs) = f
 save_resolve_func{T}(::Type{T}) = T
