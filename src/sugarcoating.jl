@@ -19,6 +19,10 @@ end
 Removes all goto/label constructs and puts them back into Julia Expr
 """
 function remove_goto(ast)
+    ast = matchreplace(ast, goto_neighbours) do goto, label
+        # a goto that is directly next to its label can be removed!
+        label[1]
+    end
     ast = matchreplace(ast, for_pattern) do colon,
             start, loop_label, unless,
             next, body, continue_label,

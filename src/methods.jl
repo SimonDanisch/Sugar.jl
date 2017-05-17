@@ -283,8 +283,6 @@ function ast_dependencies!(x, ast)
                 # but filtering would need more work!
                 if isleaftype(t)
                     push!(x, t)
-                else
-                    warn("Found abstract type: $t in expr $expr")
                 end
             end
         end
@@ -292,7 +290,6 @@ function ast_dependencies!(x, ast)
     end
 end
 function dependencies!{T}(x::LazyMethod{T}, recursive = false)
-    println("   dep: ", x.signature)
     # skip types with no dependencies (shouldn't actually even be in here)
     x.signature in (Module, DataType, Type) && return []
     if isfunction(x)
@@ -316,7 +313,6 @@ function dependencies!{T}(x::LazyMethod{T}, recursive = false)
 end
 
 function _dependencies!{T}(dep::LazyMethod{T}, visited = LazyMethod{T}(Void))
-    println("   _dep: ", dep.signature)
     if dep in visited.dependencies
         # when already in deps we need to move it up!
         delete!(visited.dependencies, dep)
@@ -443,6 +439,27 @@ Like @code_typed, but will create a lazymethod!
 """
 macro lazymethod(ex0)
     :($(Base.gen_call_with_extracted_types(:LazyMethod, ex0)))
+end
+
+function replace_slots(m::LazyMethod, ast)
+    first(Sugar.replace_expr(ast) do expr
+        if isa(expr, Slot)
+            return true, slotname(m, expr)
+        elseif isa(expr, NewvarNode)
+            return true, :(local $(slotname(m, expr.slot)))
+        else
+            return false, expr
+        end
+    end)
+end
+function get_func_expr(m::LazyMethod, name = Symbol(getfunction(m)))
+    expr = sugared(m.signature..., code_lowered)
+    body = replace_slots(m, expr)
+    args = getfuncargs(m)
+    Expr(:function,
+        Expr(:call, name, args...),
+        body
+    )
 end
 
 # interface for transpilers
