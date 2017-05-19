@@ -292,7 +292,7 @@ end
 function dependencies!{T}(x::LazyMethod{T}, recursive = false)
     # skip types with no dependencies (shouldn't actually even be in here)
     x.signature in (Module, DataType, Type) && return []
-    if isfunction(x)
+    if isfunction(x) && !isintrinsic(x)
         ast_dependencies!(x, getast!(x))
         ast_dependencies!(x, Expr(:block, getfuncargs(x)...))
     else
@@ -399,7 +399,9 @@ _expr_type{T}(lm, x::Type{T}) = Type{T}
 _expr_type{T}(lm, x::T) = T
 _expr_type(lm, slot::Union{Slot, SSAValue}) = slottype(lm, slot)
 
-instance(x) = x.instance
+instance{F <: Function}(x::Type{F}) = F.instance
+instance{T}(x::Type{T}) = x
+
 extract_type{T}(x::Type{T}) = T
 
 """
@@ -407,13 +409,13 @@ Takes any value found in the context of a LazyMethod and returns
 A concrete function!
 """
 resolve_func(m, f::AllFuncs) = f
-resolve_func{T}(m, ::Type{T}) = T
+resolve_func{T}(m, X::Type{T}) = X
 resolve_func(m, f::Union{GlobalRef, Symbol}) = eval(f)
 function resolve_func(m, slot::Union{Slot, SSAValue})
     try
         instance(expr_type(m, slot))
     catch e
-        println(slot)
+        println(expr_type(m, slot))
         println(slotname(m, slot))
         rethrow(e)
     end
@@ -454,6 +456,9 @@ function replace_slots(m::LazyMethod, ast)
 end
 function get_func_expr(m::LazyMethod, name = Symbol(getfunction(m)))
     expr = sugared(m.signature..., code_lowered)
+    get_func_expr(m, expr, name)
+end
+function get_func_expr(m::LazyMethod, expr::Expr, name = Symbol(getfunction(m)))
     body = replace_slots(m, expr)
     args = getfuncargs(m)
     Expr(:function,
