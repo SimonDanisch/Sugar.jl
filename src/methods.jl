@@ -7,7 +7,7 @@ type LazyMethod{T}
     cache
     decls::OrderedSet
     dependencies::OrderedSet{LazyMethod}
-    li
+    m
     method
     ast::Expr
     source::String
@@ -18,7 +18,7 @@ end
 LazyMethod(signature) = LazyMethod{:JL}(signature)
 LazyMethod(f::Function, types::Type) = LazyMethod{:JL}((f, types))
 
-LazyMethod{T}(::LazyMethod{T}, f::Function, types) = LazyMethod{T}((f, Base.to_tuple_type(types)))
+LazyMethod{T}(lm::LazyMethod{T}, f::Function, types) = LazyMethod{T}((f, Base.to_tuple_type(types)), lm.cache)
 
 
 function isfunction(x::LazyMethod)
@@ -63,14 +63,15 @@ function getmethod!(x::LazyMethod)
     x.method
 end
 function getcodeinfo!(x::LazyMethod)
-    if !isdefined(x, :li)
-        x.li = Sugar.get_lambda(code_typed, x.signature...)
+    if !isdefined(x, :m)
+        x.m = Sugar.get_lambda(code_typed, x.signature...)
     end
-    x.li
+    x.m
 end
 
 ssatypes(tp::LazyMethod) = getcodeinfo!(tp).ssavaluetypes
 slottypes(tp::LazyMethod) = getcodeinfo!(tp).slottypes
+slottype(tp::LazyMethod, s::TypedSlot) = s.typ
 slottype(tp::LazyMethod, s::Slot) = slottypes(tp)[s.id]
 slottype(tp::LazyMethod, s::SSAValue) = ssatypes(tp)[s.id + 1]
 function slotnames(tp::LazyMethod)
@@ -83,14 +84,20 @@ function slotnames(tp::LazyMethod)
     end
 end
 function slotname(tp::LazyMethod, s::Slot)
-    slotnames(tp)[s.id]
+    snames = slotnames(tp)
+    if s.id <= length(snames)
+        snames[s.id]
+    else
+        Symbol("slot_$(s.id)")
+    end
 end
 slotname(tp::LazyMethod, s::SSAValue) = Sugar.ssavalue_name(s)
+
 if isdefined(Base, :LambdaInfo)
     returntype(x::LazyMethod) = getcodeinfo!(x).rettype
     function method_nargs(f::LazyMethod)
-        li = getcodeinfo!(f)
-        li.nargs
+        m = getcodeinfo!(f)
+        m.nargs
     end
     function type_ast(T)
         fields = Expr(:block)
@@ -161,9 +168,34 @@ function getast!(x::LazyMethod)
     x.ast
 end
 
-function rewrite_function(li, f, types, expr)
+function rewrite_function(m, f, types, expr)
     expr.args[1] = f
     expr
+end
+function rewrite_apply(m, types, expr)
+    apply_args = expr.args[2:end]
+    if types[1] <: AllFuncs && all(x-> x <: Tuple, types[2:end])
+        to_apply = instance(types[1])
+        argtuple = apply_args[2:end]
+        tuple_len = length(argtuple)
+        # assign to tmp, in case it's  not a variable and instead a constructor expression
+        tmp_exprs = []; args = []
+        for i = 1:tuple_len
+            arg = rewrite_ast(m, argtuple[i])
+            T = types[i + 1]
+            ttup = to_tuple(T)
+            tuplen = length(ttup)
+            for j = 1:tuplen
+                # TODO, assign tuple to a tmp variable?
+                expr = :($arg[$j])
+                expr.typ = ttup[j]
+                push!(args, expr)
+            end
+        end
+        typed_expr(expr.typ, :call, to_apply, args...)
+    else
+        error("Unknown _apply construct. Found: $expr")
+    end
 end
 type_type{T}(x::Type{Type{T}}) = T
 if isdefined(Base, :LambdaInfo)
@@ -178,8 +210,8 @@ else
         to_tuple(x[2])
     end
 end
-function rewrite_ast(li, expr)
-    sparams = get_static_parameters(li)
+function rewrite_ast(m, expr)
+    sparams = get_static_parameters(m)
     if !isempty(sparams)
         expr = first(replace_expr(expr) do expr
             if isa(expr, Expr) && expr.head == :static_parameter
@@ -192,8 +224,8 @@ function rewrite_ast(li, expr)
     list = replace_expr(expr) do expr
         if isa(expr, NewvarNode)
             # slot = expr.slot
-            # T = slottype(li, slot)
-            # res = Expr(:(::), slotname(li, slot), T)
+            # T = slottype(m, slot)
+            # res = Expr(:(::), slotname(m, slot), T)
             # res.typ = T
             # seems like newvarnodes are redundant with the way we pre define
             # slots, so we can drop them here! # TODO is this true?
@@ -204,11 +236,11 @@ function rewrite_ast(li, expr)
             args, head = expr.args, expr.head
             if head == :(=)
                 lhs = args[1]
-                rhs = map(x-> rewrite_ast(li, x), args[2:end])
+                rhs = map(x-> rewrite_ast(m, x), args[2:end])
                 res = similar_expr(expr, [lhs, rhs...])
-                if !(lhs in li.decls)
-                    push!(li.decls, lhs)
-                    T = expr_type(li, lhs)
+                if !(lhs in m.decls)
+                    push!(m.decls, lhs)
+                    T = expr_type(m, lhs)
                     decl = Expr(:(::), lhs, T)
                     decl.typ = T
                     return true, (decl, res) # splice in declaration
@@ -219,12 +251,15 @@ function rewrite_ast(li, expr)
                 if func == GlobalRef(Core, :apply_type)
                     # TODO do something!!
                 end
-                types = (map(x-> expr_type(li, x), args[2:end])...)
-                f = resolve_func(li, func)
-                result = rewrite_function(li, f, types, similar_expr(expr, args))
+                types = (map(x-> expr_type(m, x), args[2:end])...)
+                f = resolve_func(m, func)
+                if f == Core._apply
+                    return true, rewrite_apply(m, types, expr)
+                end
+                result = rewrite_function(m, f, types, similar_expr(expr, args))
                 if isa(result, Expr)
                     map!(result.args, result.args) do x
-                        rewrite_ast(li, x)
+                        rewrite_ast(m, x)
                     end
                 end
                 return true, result
@@ -246,7 +281,7 @@ function ast_dependencies!(x, ast)
                 t = Sugar.expr_type(x, expr)
                 # TODO this could hide problems, but there are some expr untyped which don't matter
                 # but filtering would need more work!
-                if t != Any
+                if isleaftype(t)
                     push!(x, t)
                 end
             end
@@ -255,56 +290,45 @@ function ast_dependencies!(x, ast)
     end
 end
 function dependencies!{T}(x::LazyMethod{T}, recursive = false)
-    if x.signature in (Module, DataType, Type)
-        return []
-    end
+    # skip types with no dependencies (shouldn't actually even be in here)
+    x.signature in (Module, DataType, Type) && return []
     if isfunction(x)
         ast_dependencies!(x, getast!(x))
         ast_dependencies!(x, Expr(:block, getfuncargs(x)...))
     else
         t = x.signature
-        for i in 1:nfields(t)
+        set = OrderedSet()
+        for i in 1:nfields(t) # add all fields
             FT = fieldtype(t, i)
-            dep = LazyMethod{T}(FT)
-            if !(dep in x.dependencies)
-                push!(x, dep)
-                union!(x.dependencies, dependencies!(dep))
-            end
+            dep = LazyMethod{T}(FT, x.cache)
+            push!(set, dep)
         end
+        union!(x.dependencies, set)
     end
     if recursive # we don't add them to x!!
         deps = x.dependencies
-        return union(deps, _dependencies!(copy(deps), LazyMethod{T}(Void)))
+        return union(deps, _dependencies!(copy(deps), LazyMethod{T}(Void, x.cache)))
     end
     x.dependencies
 end
 
-function _dependencies!{T}(dep::LazyMethod{T}, visited = LazyMethod{T}(Void), stack = [])
+function _dependencies!{T}(dep::LazyMethod{T}, visited = LazyMethod{T}(Void))
     if dep in visited.dependencies
         # when already in deps we need to move it up!
         delete!(visited.dependencies, dep)
         push!(visited.dependencies, dep)
     else
         push!(visited, dep)
-        try
-            push!(stack, dep.signature)
+        if !isintrinsic(dep)
             _dependencies!(dependencies!(dep), visited)
-        catch e
-            for elem in stack
-                println("  ", elem)
-            end
-        finally
-            pop!(stack)
         end
     end
     visited.dependencies
 end
-function _dependencies!(deps, visited, stack = [])
+function _dependencies!(deps, visited)
     for dep in copy(deps)
         if !Sugar.isintrinsic(dep)
-            push!(stack, dep.signature)
             _dependencies!(dep, visited)
-            pop!(stack)
         end
     end
     visited.dependencies
@@ -382,20 +406,24 @@ extract_type{T}(x::Type{T}) = T
 Takes any value found in the context of a LazyMethod and returns
 A concrete function!
 """
-resolve_func(li, f::AllFuncs) = f
-resolve_func{T}(li, ::Type{T}) = T
-resolve_func(li, f::Union{GlobalRef, Symbol}) = eval(f)
-function resolve_func(li, slot::Slot)
+resolve_func(m, f::AllFuncs) = f
+resolve_func{T}(m, ::Type{T}) = T
+resolve_func(m, f::Union{GlobalRef, Symbol}) = eval(f)
+function resolve_func(m, slot::Union{Slot, SSAValue})
     try
-        instance(expr_type(li, slot))
+        instance(expr_type(m, slot))
     catch e
-        println(expr_type(li, slot))
+        println(slot)
+        println(slotname(m, slot))
         rethrow(e)
     end
 end
-function resolve_func(li, f::Expr)
+function resolve_func(m, f::Expr)
     if f.typ <: Type
         return extract_type(f.typ)
+    end
+    if f.typ <: AllFuncs
+        return instance(f.typ)
     end
     try
         # TODO figure out what can go wrong here, since this seems rather fragile
@@ -411,6 +439,27 @@ Like @code_typed, but will create a lazymethod!
 """
 macro lazymethod(ex0)
     :($(Base.gen_call_with_extracted_types(:LazyMethod, ex0)))
+end
+
+function replace_slots(m::LazyMethod, ast)
+    first(Sugar.replace_expr(ast) do expr
+        if isa(expr, Slot)
+            return true, slotname(m, expr)
+        elseif isa(expr, NewvarNode)
+            return true, :(local $(slotname(m, expr.slot)))
+        else
+            return false, expr
+        end
+    end)
+end
+function get_func_expr(m::LazyMethod, name = Symbol(getfunction(m)))
+    expr = sugared(m.signature..., code_lowered)
+    body = replace_slots(m, expr)
+    args = getfuncargs(m)
+    Expr(:function,
+        Expr(:call, name, args...),
+        body
+    )
 end
 
 # interface for transpilers

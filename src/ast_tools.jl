@@ -9,7 +9,11 @@ function similar_expr(x::Expr, args)
 end
 similar_expr(x::Expr) = similar_expr(x, [])
 
-
+function typed_expr(T, head, args...)
+    expr = Expr(head, args...)
+    expr.typ = T
+    expr
+end
 function filter_expr(keep, ast)
     replace_or_drop(x-> (false, x), x-> !keep(x), ast)
 end

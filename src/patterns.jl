@@ -25,6 +25,12 @@ function is_goto(goto, hist, histpos)
     label = hist[histpos][1]
     goto.label == label.label
 end
+function is_unless_goto(goto, hist, histpos)
+    isgoto(goto) || return false
+    unless = hist[histpos][1]
+    goto.label == unless.args[2]
+end
+
 save_resolve_func(x) = nothing
 save_resolve_func(f::AllFuncs) = f
 save_resolve_func{T}(::Type{T}) = T
@@ -109,11 +115,20 @@ const while_pattern = (
     isunless, # while condition branch
     anything, # body
     Greed(islabelnode, 0:1), # optional continue label
-    (l,h)-> is_goto(l, h, 1), # goto label, matching first label
-    (l,h)-> is_unless_label(l, h, 2) # goto and break
+    (l, h)-> is_goto(l, h, 1), # goto label, matching first label
+    (l, h)-> is_unless_label(l, h, 2) # goto and break
 )
 
-const if_pattern = (isunless, anything, is_unless_label)
+const if_pattern = (
+    isunless, # condition
+    anything, # body
+    is_unless_label
+)
+
+const goto_neighbours = (
+    isgoto, # goto label directly next to it
+    (l, h)-> is_goto_label(l, h, 1)
+)
 
 
 ##########################

@@ -12,9 +12,8 @@ function controlflow_1(a, b)
         for i = 1:100
             x += i
             x -= 77
-            if i == 77
-                continue
-            elseif i == 99
+            i == 77 && continue
+            if i == 99 && (i % 2 == 0)
                 break
             end
         end
@@ -24,19 +23,14 @@ function controlflow_1(a, b)
     end
 end
 
-ast = Sugar.sugared(controlflow_1, (Int, Int), code_lowered)
-# open(joinpath(dirname(@__FILE__), "controlflow_05.jls"), "w") do io
-#     serialize(io, ast)
-# end
-# serialization doesn't work between julia versions,
-# and it'd be annoying to rely on e.g. JLD/JSON (maybe reasonable, though)
-ast2 = if VERSION < v"0.6.0-dev"
-    open(deserialize, joinpath(dirname(@__FILE__), "controlflow_05.jls"))
-else
-    open(deserialize, joinpath(dirname(@__FILE__), "controlflow_06.jls"))
+method = Sugar.LazyMethod((controlflow_1, (Int, Int)))
+func_expr = Sugar.get_func_expr(method, gensym(:controlflow_1))
+round_tripped = eval(func_expr)
+srand()
+for i = 1:1000
+    x, y = rand(-5000:5000), rand(-5000:5000)
+    @test round_tripped(1, 2) == controlflow_1(1, 2)
 end
-
-@test ast == ast2
 
 decl = @lazymethod controlflow_1(1, 2)
 
@@ -64,13 +58,16 @@ end
 # The dependencies and implementation on 0.6 have changed quite a bit...
 # TODO add a `pure` example, which doesn't rely on implementations of base!
 deps = Sugar.dependencies!(decl, true)
+
 @testset "method dependencies" begin
     deps = Sugar.dependencies!(decl, true)
     deps_test = [
+        Bool,
         Int,
-        (==,Tuple{Int64,Int64}),
-        (+,Tuple{Int,Int}),
-        (-,Tuple{Int,Int}),
+        (==, Tuple{Int64,Int64}),
+        (+, Tuple{Int,Int}),
+        (-, Tuple{Int,Int}),
+        (rem, Tuple{Int,Int}),
     ]
     @test length(deps) == length(deps_test)
     @test all(x-> x.signature in deps_test, deps)
@@ -78,12 +75,14 @@ deps = Sugar.dependencies!(decl, true)
         (==,Tuple{Int64,Int64}),
         (+,Tuple{Int, Int}),
         (-,Tuple{Int, Int}),
+        (rem, Tuple{Int,Int}),
     ]
     funcdeps = filter(Sugar.isfunction, deps)
     @test length(funcdeps) == length(funcs)
     @test all(x-> x.signature in funcs, funcdeps)
     types = [
         Int64,
+        Bool
     ]
     typedeps = filter(Sugar.istype, deps)
     @test length(typedeps) == length(types)
@@ -159,3 +158,19 @@ target_expr = typed_expr(:block, Float32, ast_target...)
 @testset "for + ifelse" begin
     @test target_expr == ast
 end
+
+function test1(a, b)
+    c = a + b
+    a == c && (c = a)
+    c
+end
+function test2(a, b)
+    c = a + b
+    if a == c
+        c = a
+    end
+    c
+end
+ast1 = Sugar.sugared(test1, (Int, Int), code_lowered)
+ast2 = Sugar.sugared(test2, (Int, Int), code_lowered)
+@test ast1 == ast2
