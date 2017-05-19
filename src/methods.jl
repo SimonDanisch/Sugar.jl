@@ -7,7 +7,7 @@ type LazyMethod{T}
     cache
     decls::OrderedSet
     dependencies::OrderedSet{LazyMethod}
-    m
+    codeinfo
     method
     ast::Expr
     source::String
@@ -63,10 +63,10 @@ function getmethod!(x::LazyMethod)
     x.method
 end
 function getcodeinfo!(x::LazyMethod)
-    if !isdefined(x, :m)
-        x.m = Sugar.get_lambda(code_typed, x.signature...)
+    if !isdefined(x, :codeinfo)
+        x.codeinfo = Sugar.get_lambda(code_typed, x.signature...)
     end
-    x.m
+    x.codeinfo
 end
 
 ssatypes(tp::LazyMethod) = getcodeinfo!(tp).ssavaluetypes
@@ -96,8 +96,8 @@ slotname(tp::LazyMethod, s::SSAValue) = Sugar.ssavalue_name(s)
 if isdefined(Base, :LambdaInfo)
     returntype(x::LazyMethod) = getcodeinfo!(x).rettype
     function method_nargs(f::LazyMethod)
-        m = getcodeinfo!(f)
-        m.nargs
+        codeinfo = getcodeinfo!(f)
+        codeinfo.nargs
     end
     function type_ast(T)
         fields = Expr(:block)
@@ -111,8 +111,8 @@ if isdefined(Base, :LambdaInfo)
 else
     returntype(x::LazyMethod) = Base.Core.Inference.return_type(x.signature...)
     function method_nargs(f::LazyMethod)
-        m = getmethod!(f)
-        m.nargs
+        method = getmethod!(f)
+        method.nargs
     end
     function type_ast(T)
         fields = Expr(:block)
