@@ -292,9 +292,11 @@ end
 function dependencies!{T}(x::LazyMethod{T}, recursive = false)
     # skip types with no dependencies (shouldn't actually even be in here)
     x.signature in (Module, DataType, Type) && return []
-    if isfunction(x) && !isintrinsic(x)
-        ast_dependencies!(x, getast!(x))
-        ast_dependencies!(x, Expr(:block, getfuncargs(x)...))
+    if isfunction(x)
+        if !isintrinsic(x)
+            ast_dependencies!(x, getast!(x))
+            ast_dependencies!(x, Expr(:block, getfuncargs(x)...))
+        end
     else
         t = x.signature
         set = OrderedSet()
@@ -445,7 +447,7 @@ end
 
 function replace_slots(m::LazyMethod, ast)
     first(Sugar.replace_expr(ast) do expr
-        if isa(expr, Slot)
+        if isa(expr, Slot) || isa(expr, SSAValue)
             return true, slotname(m, expr)
         elseif isa(expr, NewvarNode)
             return true, :(local $(slotname(m, expr.slot)))
