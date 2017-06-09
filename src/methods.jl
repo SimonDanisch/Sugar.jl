@@ -275,7 +275,15 @@ function ast_dependencies!(x, ast)
         if isa(expr, Expr) && expr.head != :block && expr.head != :(=)
             if expr.head == :call
                 f = expr.args[1]
-                types = Tuple{map(arg-> Sugar.expr_type(x, arg), expr.args[2:end])...}
+                type_arr = map(arg-> Sugar.expr_type(x, arg), expr.args[2:end])
+                types = Tuple{type_arr...}
+                for elem in type_arr
+                    push!(x, elem)
+                end
+                if isa(f, Type)
+                    println(f)
+                    push!(x, f)
+                end
                 push!(x, (f, types))
             else
                 t = Sugar.expr_type(x, expr)
