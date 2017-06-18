@@ -258,27 +258,3 @@ function clean_typed(f, types)
     sdict = slot_dictionary(get_lambda(code_typed, f, types))
     insert_types(ast, sdict)
 end
-
-const _source_map = Dict{Function, Expr}()
-
-macro preserve_source(expr)
-    # TODO this doesn't seem to work for curly
-    result = @match expr begin
-        (
-            f_(args__) = body_ |
-            function f_(args__) body_ end |
-            f_{sargs__}(args__) = body_ |
-            function f_{sargs__}(args__) body_ end
-        ) => (f, args, body)
-    end
-    if result == nothing
-        error("Expr $expr doesn't declare a function")
-    end
-    func_expr = MacroTools.longdef(expr) # always have the function be in long form (function x(args...) end)
-    quote
-        # evaluate function
-        $expr
-        # insert into source map
-        _source_map[$f] = $(Expr(:quote, func_expr))
-    end
-end
