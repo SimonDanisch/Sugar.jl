@@ -89,7 +89,7 @@ Sugared, normalized AST, which basically decompiles the expr list returned by e.
 """
 function sugared(f, types, stage = code_lowered)
     ast = get_ast(stage, f, types)
-    # ast = normalize_ast(ast)
+    ast = normalize_ast(ast)
     ast = remove_goto(filter(x-> x != nothing && !is_linenumber(x), ast))
     body = Expr(:block)
     append!(body.args, ast)
