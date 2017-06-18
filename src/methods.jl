@@ -64,7 +64,7 @@ function getmethod!(x::LazyMethod)
 end
 function getcodeinfo!(x::LazyMethod)
     if !isdefined(x, :codeinfo)
-        x.codeinfo = Sugar.get_lambda(code_typed, x.signature...)
+        x.codeinfo = Sugar.get_lambda(code_lowered, x.signature...)
     end
     x.codeinfo
 end
