@@ -25,7 +25,7 @@ function remove_goto(ast)
     end
 
     ast = matchreplace(ast, for_pattern) do colon,
-            start, loop_label, unless,
+            start, loop_label, unless, unused,
             next, body, continue_label,
             goto, break_label
         colonargs = colon[1].args[2].args
@@ -76,7 +76,7 @@ function remove_goto(ast)
         elsebody = Expr(:block, remove_goto(elsebody)...)
         Expr(:if, condition, ifbody, elsebody)
     end
-    ast = matchreplace(ast, if_pattern) do unless, body, label
+    ast = matchreplace(ast, if_pattern) do unless, body, label...
         condition = unless[1].args[1]
         ifbody = Expr(:block, remove_goto(collect(body))...)
         Expr(:if, condition, ifbody)
