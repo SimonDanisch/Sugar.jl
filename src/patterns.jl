@@ -95,6 +95,7 @@ const for_pattern = (
     isstart,
     islabelnode, # loop goto label
     is_done_unless, # while condition branch
+    anything, # new varnodes etc
     isnext,
     anything, # body
     Greed(islabelnode, 0:1), # optional continue label
@@ -122,7 +123,7 @@ const while_pattern = (
 const if_pattern = (
     isunless, # condition
     anything, # body
-    is_unless_label
+    Greed(is_unless_label, 0:1)
 )
 
 const goto_neighbours = (
