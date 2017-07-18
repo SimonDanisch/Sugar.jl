@@ -70,9 +70,7 @@ Base.hash(x::LazyMethod, h::UInt64) = hash(x.signature, h)
 Base.show(io::IO, x::LazyMethod) = show(io, MIME"text/plain"(), x)
 function Base.show(io::IO, mt::MIME"text/plain", x::LazyMethod)
     if isfunction(x)
-        m = getmethod!(x)
-        call = Expr(:call, x, map(arg-> (arg.typ = Any; arg), getfuncargs(x))...)
-        Base.show_unquoted(io, call)
+        print(io, x.signature[1], '(', join(to_tuple(x.signature[2]), ", "), ')')
     else
         show(io, mt, x.signature)
     end
@@ -117,7 +115,7 @@ function getslots!(m::LazyMethod)
             # tmp must be made unique
             # TODO check if this is just because I mess up scope!
             if name == Symbol("#temp#")
-                name = Symbol("xxtempx", i)
+                name = Symbol("xtempx_", i)
             end
             push!(slots, (T, name))
         end
@@ -145,8 +143,7 @@ function slotname(m::LazyMethod, s::Slot)
         Symbol("slot_$(s.id)")
     end
 end
-
-if isdefined(Base, :LambdaInfo)
+if isdefined(Base, :LambdaInfo) # julia 0.5
     returntype(x::LazyMethod) = getcodeinfo!(x).rettype
     function method_nargs(f::LazyMethod)
         codeinfo = getcodeinfo!(f)
@@ -161,7 +158,7 @@ if isdefined(Base, :LambdaInfo)
         end
         expr
     end
-else
+else # julia 0.6
     returntype(x::LazyMethod) = Base.Core.Inference.return_type(x.signature...)
     function method_nargs(f::LazyMethod)
         method = getmethod!(f)
@@ -186,7 +183,7 @@ function has_varargs(x::LazyMethod)
         return false, 0
     end
     n = method_nargs(x)
-    calltypes, real_signature = to_tuple(x.signature[2]), slottypes(x)[1:end]
+    calltypes, real_signature = to_tuple(x.signature[2]), to_tuple(slottypes(x)[1:(n-1)])
     if calltypes == real_signature
         return false, n - 1
     else
@@ -233,9 +230,10 @@ function getast!(x::LazyMethod)
                 expr = sugared(x.signature..., code_typed)
                 st = getslots!(x)
                 for (i, (T, name)) in enumerate(st)
-                    slot = SlotNumber(i)
+                    slot = TypedSlot(i + 1, T)
                     push!(x.decls, slot)
-                    if i > nargs # if not defined in arguments, define in body
+                    push!(x, T)
+                    if i + 1 > nargs # if not defined in arguments, define in body
                         tmp = :($name::$T)
                         tmp.typ = T
                         unshift!(expr.args, tmp)
@@ -305,9 +303,16 @@ function rewrite_apply(m, types, expr)
         end
         expr = typed_expr(orig_expr.typ, :call, to_apply, args...)
         childmethod = LazyMethod(m, to_apply, (apply_types...,))
+        push!(m, childmethod)
         expr = rewrite_function(childmethod, expr)
-        # TODO rewrite is not guaranteed to return a call expression
-        expr = rewrite_ast(m, expr)
+        hasvarargs, n = has_varargs(childmethod)
+        if hasvarargs
+            # make a tuple out of varargs
+            tupt = Tuple{apply_types[n:end]...}
+            tup_expr = typed_expr(tupt, :call, tuple, expr.args[(n + 1):length(expr.args)]...)
+            tup_expr = rewrite_ast(m, tup_expr)
+            expr.args = [expr.args[1:n]..., tup_expr]
+        end
         InlineNode(tmp_exprs, expr)
     else
         error("Unknown _apply construct. Found: $expr")
@@ -323,6 +328,7 @@ else
         # TODO is this the correct way to get static parameters?! It seems to work at least
         world = typemax(UInt)
         y = Base._methods(lm.signature..., -1, world)
+        isempty(y) && return ()
         x = first(y)
         to_tuple(x[2])
     end
@@ -335,6 +341,59 @@ end
 specialized_typeof{T}(::T) = T
 specialized_typeof{T}(::Type{T}) = Type{T}
 
+
+make_typed_slot(m, slot::SlotNumber) = TypedSlot(slot.id, slottype(m, slot))
+make_typed_slot(m, slot::TypedSlot) = slot
+function make_typed_slot(m, slot::SSAValue)
+    newslot!(m, slottype(m, slot), slotname(m, slot))
+end
+make_typed_slot(m, slot) = error("Lhs not a slot. Found: $slot")
+
+# applicable is not overloadable
+function exists(x::LazyMethod)
+    istype(x) && return true # you can't construct a non existing type
+    isintrinsic(x) && return true # must exist when intrinsic
+    try
+        getmethod!(x)
+        return true
+    catch e
+        println(e)
+        return false
+    end
+end
+function isconcrete(x::LazyMethod)
+    istype(x) && return isleaftype(x.signature)
+    all(x-> isleaftype(x), Sugar.to_tuple(x.signature[2]))
+end
+
+Base.isvalid(x::LazyMethod) = exists(x) && isconcrete(x)
+
+function assert_validity(x::LazyMethod)
+    isvalid(x) || print_stack_trace(STDERR, x)
+    if !isconcrete(x)
+        throw(error("Method $x doesn't have concrete call types!"))
+    end
+    if !exists(x)
+        throw(error("Method $x doesn't exist!"))
+    end
+end
+
+
+function rewrite_vararg(lm, args, types)
+    has_a_serious_case_of_the_varargs, n = has_varargs(lm)
+    if has_a_serious_case_of_the_varargs
+        # make a tuple out of varargs
+        tup_expr = Expr(:call, tuple)
+        for i in (n + 1):length(args)
+            push!(tup_expr.args, args[i])
+        end
+        tupt = Tuple{types[n:end]...}
+        tup_expr.typ = tupt
+        types = (types[1:(n-1)]..., tupt)
+        args = [args[1:n]..., tup_expr]
+    end
+    args, types
+end
 """
 Rewrite the ast to resolve everything statically
 and infers the dependencies of an expression
@@ -374,7 +433,7 @@ function rewrite_ast(m, expr)
         elseif isa(expr, Expr)
             args, head = expr.args, expr.head
             if head == :(=)
-                lhs = args[1]
+                lhs = make_typed_slot(m, args[1])
                 rhs = map(x-> rewrite_ast(m, x), args[2:end])
                 res = similar_expr(expr, [lhs, rhs...])
                 if !(lhs in m.decls) # if not already declared
@@ -395,26 +454,13 @@ function rewrite_ast(m, expr)
                     return true, rewrite_apply(m, types, expr)
                 end
                 lm = LazyMethod(m, f, types)
-                has_a_serious_case_of_the_varargs, n = has_varargs(lm)
-                if has_a_serious_case_of_the_varargs
-                    # make a tuple out of varargs
-                    tup_expr = Expr(:call, tuple)
-                    for i in (n + 1):length(args)
-                        push!(tup_expr.args, args[i])
-                    end
-                    tupt = Tuple{types[n:length(types)]...}
-                    println("vvv> ", f, " ", tupt)
-                    tup_expr.typ = tupt
-                    types = (types[1:(n-1)]..., tupt)
-                    args = [args[1:n]..., tup_expr]
-                end
+                assert_validity(lm) # lets try to catch errors as soon as possible!
+                args, types = rewrite_vararg(lm, args, types)
                 args[1] = lm
                 result = rewrite_function(lm, similar_expr(expr, args))
                 if isa(result, Expr)
                     # recursively rewrite arguments
-                    map!(result.args, result.args) do x
-                        rewrite_ast(m, x)
-                    end
+                    result.args = map(x-> rewrite_ast(m, x), result.args)
                 end
                 return true, result
             end
@@ -423,10 +469,11 @@ function rewrite_ast(m, expr)
         # and we're only interested in catching the dependencies of values.
         # Expr types to be expected: return, if/else, while/for,curly and so forth
         if isa(expr, LazyMethod)
+            assert_validity(expr)
             push!(m, expr)
-        elseif isa(expr, TypedSlot)
-            push!(m, expr.typ)
-        elseif !isa(expr, Expr)
+        elseif isa(expr, TypedSlot) || isa(expr, SSAValue)
+            push!(m, expr_type(m, expr))
+        elseif !isa(expr, Expr) && !isa(expr, Symbol)
             push!(m, specialized_typeof(expr))
         end
         false, expr
@@ -439,19 +486,36 @@ function rewrite_ast(m, expr)
     end
 end
 
+function type_dependencies!(lm::LazyMethod)
+    typ = lm.signature
+    if isleaftype(typ) || isa(typ, Type)
+        for name in fieldnames(typ)
+            push!(lm, fieldtype(typ, name))
+        end
+        for T in typ.parameters
+            isa(T, DataType) && push!(lm, T)
+        end
+    else
+        print_stack_trace(STDERR, lm)
+        error("Found non concrete type: $(lm.signature)")
+    end
+end
 
 function dependencies!(lm::LazyMethod, recursive = false)
     deps = OrderedSet{typeof(lm)}()
-    isintrinsic(lm) && return deps
-    getast!(lm) # walks ast && insertes dependencies
+    if isfunction(lm)
+        getast!(lm) # walks ast && insertes dependencies
+    else
+        type_dependencies!(lm)
+    end
     for elem in lm.dependencies
-        push!(deps, elem)
         if recursive
             deps2 = dependencies!(elem, true)
             for elem2 in deps2 # lol there is no append! ?!
                 push!(deps, elem2)
             end
         end
+        push!(deps, elem)
     end
     deps
 end
