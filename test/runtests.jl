@@ -1,6 +1,7 @@
 using Sugar, MacroTools, Base.Test
 using Base.Test
-import Sugar: @lazymethod
+
+srand()
 
 function controlflow_1(a, b)
     if a == 10
@@ -23,14 +24,40 @@ function controlflow_1(a, b)
     end
 end
 
-method = Sugar.LazyMethod(controlflow_1, (Int, Int))
-func_expr = Sugar.get_func_expr(method, gensym(:controlflow_1))
-round_tripped = eval(func_expr)
-srand()
-for i = 1:1000
-    x, y = rand(-5000:5000), rand(-5000:5000)
-    @test round_tripped(1, 2) == controlflow_1(1, 2)
+apply_vararg2(x...) = +(x...)
+
+
+@testset "round trips" begin
+    @testset "control flow" begin
+        method = Sugar.LazyMethod(controlflow_1, (Int, Int))
+        func_expr = Sugar.get_func_expr(method, gensym(:controlflow_1))
+        try
+            round_tripped = eval(func_expr)
+            for i = 1:10
+                x, y = rand(-5000:5000), rand(-5000:5000)
+                @test round_tripped(x, y) == controlflow_1(x, y)
+            end
+        catch e
+            warn(e)
+            @test false
+        end
+    end
+    @testset "apply vararg" begin
+        method = @lazymethod apply_vararg2(1, 2, 3)
+        func_expr = Sugar.get_func_expr(method, gensym(:varargtest))
+        try
+            round_tripped = eval(func_expr)
+            # note that you need to pass a tuple, since that's what it expects
+            # TODO, move the construction of the tuple into function body?
+            @test apply_vararg2(1, 2, 3) == round_tripped((1, 2, 3))
+        catch e
+            warn(e)
+            @test false
+        end
+    end
 end
+
+
 
 decl = @lazymethod controlflow_1(1, 2)
 ast = Sugar.getast!(decl)
