@@ -23,7 +23,7 @@ function controlflow_1(a, b)
     end
 end
 
-method = Sugar.LazyMethod((controlflow_1, (Int, Int)))
+method = Sugar.LazyMethod(controlflow_1, (Int, Int))
 func_expr = Sugar.get_func_expr(method, gensym(:controlflow_1))
 round_tripped = eval(func_expr)
 srand()
@@ -33,7 +33,6 @@ for i = 1:1000
 end
 
 decl = @lazymethod controlflow_1(1, 2)
-
 ast = Sugar.getast!(decl)
 needsnotype = (:block, :if, :(=), :while, :return, :continue, :break, :for, :(:))
 @testset "ast rewriting and normalization" begin
@@ -49,7 +48,7 @@ needsnotype = (:block, :if, :(=), :while, :return, :continue, :break, :for, :(:)
             if expr.head == :call
                 f = expr.args[1]
                 # all function calls should get replaced by the real function
-                @test isa(f, Function)
+                @test isa(f, LazyMethod)
             end
         end
         expr
@@ -57,10 +56,11 @@ needsnotype = (:block, :if, :(=), :while, :return, :continue, :break, :for, :(:)
 end
 # The dependencies and implementation on 0.6 have changed quite a bit...
 # TODO add a `pure` example, which doesn't rely on implementations of base!
-deps = Sugar.dependencies!(decl, true)
+decl = @lazymethod controlflow_1(1, 2)
+ast = Sugar.getast!(decl)
 
 @testset "method dependencies" begin
-    deps = Sugar.dependencies!(decl, true)
+    deps = Sugar.dependencies!(decl)
     deps_test = [
         Bool,
         Int,
@@ -111,16 +111,10 @@ function typed_expr(head, typ, args...)
     expr
 end
 ast_target = []
-push!(ast_target, typed_expr(:(::), Int, :i, Int))
-push!(ast_target, typed_expr(:(::), Int, :xxtempx4, Int))
 push!(ast_target, typed_expr(:(::), Float32, :acc, Float32))
-sloti, slotx, slotacc = if VERSION < v"0.6.0-dev"
-    SlotNumber(5), SlotNumber(2), SlotNumber(3)
-else
-    # slotnumbers seem to have changed.. besides in testing, this shouldn't be a problem!
-    reverse!(ast_target)
-    SlotNumber(3), SlotNumber(2), SlotNumber(5)
-end
+push!(ast_target, typed_expr(:(::), Int, :xtempx_4, Int))
+push!(ast_target, typed_expr(:(::), Int, :i, Int))
+sloti, slotx, slotacc = TypedSlot(3, Int), TypedSlot(2, Float32), TypedSlot(5, Float32)
 
 push!(ast_target, :($slotacc = $slotx))
 for_loop = Expr(:for)
@@ -155,9 +149,29 @@ push!(ast_target, for_loop)
 push!(ast_target, :(return $(slotacc)))
 target_expr = typed_expr(:block, Float32, ast_target...)
 
-@testset "for + ifelse" begin
-    @test target_expr == ast
+function compare(x, y::LazyMethod)
+    if Sugar.isfunction(y)
+        Sugar.getfunction(y) == x || error("$x $y no match")
+    else
+        y.signature == x || error("$x $y no match")
+    end
 end
+compare(x, y) = (x == y || error("$x $y no match"); true)
+function compare(x::Expr, y::Expr)
+    x.head == y.head || error("$x $y no match")
+    x.typ == y.typ || error("$x $y no match")
+    length(x.args) == length(y.args) || error("$x $y no match")
+    for (a, b) in zip(x.args, y.args)
+        compare(a, b)
+    end
+    true
+end
+@testset "for + ifelse" begin
+    @test compare(target_expr, ast)
+end
+
+
+
 
 function test1(a, b)
     c = a + b
@@ -174,3 +188,14 @@ end
 ast1 = Sugar.sugared(test1, (Int, Int), code_lowered)
 ast2 = Sugar.sugared(test2, (Int, Int), code_lowered)
 @test ast1 == ast2
+
+
+test3(b) = one(b)
+lm = @lazymethod test3(Int)
+deps = [LazyMethod(Type{Int}), @lazymethod(one(Int))]
+@test all(x-> x in deps, dependencies!(lm))
+
+test4(b::T) where T = one(T)
+lm = @lazymethod test4(1)
+deps = [LazyMethod(Int), LazyMethod(Type{Int}), @lazymethod(one(Int))]
+@test all(x-> x in deps, dependencies!(lm))

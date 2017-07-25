@@ -87,7 +87,7 @@ resolve_typ(x::GlobalRef) = eval(x)
 function _normalize_ast(expr::Expr)
     if expr.head == :invoke
         lam = expr.args[1] # Ignore lambda for now
-        res = similar_expr(expr, map(normalize_ast, view(res.args, 2:length(expr.args))))
+        res = similar_expr(expr, map(normalize_ast, view(expr.args, 2:length(expr.args))))
         return true, res
     elseif expr.head == :new
         T = resolve_typ(expr.args[1])

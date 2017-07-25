@@ -76,11 +76,12 @@ function Base.show(io::IO, mt::MIME"text/plain", x::LazyMethod)
     end
 end
 
+
 function Base.show_unquoted(io::IO, x::LazyMethod, ::Int, ::Int)
     if isfunction(x)
-        print(io, getfunction(x))
+        print(io, functionname(io, x))
     else
-        print(io, x.signature)
+        print(io, typename(io, x.signature))
     end
 end
 
@@ -406,7 +407,9 @@ function rewrite_ast(m, expr)
         # all static params being resolved!s
         expr = first(replace_expr(expr) do expr
             if isa(expr, Expr) && expr.head == :static_parameter
-                true, sparams[expr.args[1]]
+                param = sparams[expr.args[1]]
+                push!(m, specialized_typeof(param))
+                true, param
             else
                 false, expr
             end
@@ -473,8 +476,9 @@ function rewrite_ast(m, expr)
             push!(m, expr)
         elseif isa(expr, TypedSlot) || isa(expr, SSAValue)
             push!(m, expr_type(m, expr))
-        elseif !isa(expr, Expr) && !isa(expr, Symbol)
-            push!(m, specialized_typeof(expr))
+        # elseif isa(expr, DataType)
+        #     println(expr)
+        #     push!(m, specialized_typeof(expr))
         end
         false, expr
     end
@@ -710,7 +714,13 @@ end
 # interface for transpilers
 function typename end
 function _typename end
-function functionname end
+function functionname(io::IO, lm::LazyMethod)
+    if isfunction(lm)
+        string(Symbol(getfunction(lm)))
+    else
+        error("Not a function: $lm")
+    end
+end
 function show_name end
 function show_type end
 function show_function end

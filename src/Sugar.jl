@@ -28,5 +28,6 @@ include("show.jl")
 # helper to work with methods
 include("methods.jl")
 
+export LazyMethod, getast!, getfunction, isfunction, istype, dependencies!, @lazymethod
 
 end # module
