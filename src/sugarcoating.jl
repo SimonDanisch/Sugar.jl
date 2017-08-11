@@ -1,4 +1,4 @@
-using Base: is_linenumber
+is_linenumber(x::ANY) = isexpr(x, :line) || isa(x, LineNumberNode)
 
 """
 Replaces `goto` statements in a loop body with continue and break.
