@@ -514,11 +514,17 @@ function rewrite_ast(m, expr)
             println(STDERR, "Error in Expr rewrite! This error might be ignored:")
              # TODO filter errors, there are definitely errors that we can pick out that needs to be rethrown
             println(STDERR, e)
+            println(STDERR, "Expression resulting in the error: ")
+            show_source(STDERR, m, expr)
+            println(STDERR)
             println(STDERR, "happening in function tree:")
             Sugar.print_stack_trace(STDERR, m)
             println(STDERR)
             println(STDERR, "Code of the context this error occured in: ")
-            println(STDERR, Sugar.sugared(m.signature..., code_typed))
+            # we need to use `sugared` directly, since otherwise it will
+            # try to rewrite the expression an exactly run into this error while printing the error
+            show_source(STDERR, m, Sugar.sugared(m.signature..., code_typed))
+            println(STDERR)
             println(STDERR, "___________________________________________________________________")
         end
         false, expr
@@ -529,6 +535,19 @@ function rewrite_ast(m, expr)
     else
         return expr
     end
+end
+
+function show_source(io::IO, m::LazyMethod, body = getast!(m))
+    src = getcodeinfo!(m)
+    emph_io = Base.IOContext(io, :TYPEEMPHASIZE => true)
+    sn = ["self", String.(Sugar.slotnames(m))...]
+    Base.show_unquoted(
+        Base.IOContext(
+            Base.IOContext(emph_io, :SOURCEINFO => src),
+            :SOURCE_SLOTNAMES => sn
+        ),
+        body, 2
+    )
 end
 
 function type_dependencies!(lm::LazyMethod)
