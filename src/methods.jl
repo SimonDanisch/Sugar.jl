@@ -101,8 +101,16 @@ function getcodeinfo!(x::LazyMethod)
 end
 
 function newslot!(m, T, name = gensym())
-    push!(m.slots, (T, name))
-    TypedSlot(length(m.slots) + 1, T)
+    slot = (T, name)
+    idx = findfirst(m.slots, slot)
+    if idx > 0
+        # means we already have a slot with this name, which we can use.
+        # This needs to be treated with care, since it might also be a clash
+        return TypedSlot(idx, T)
+    else
+        push!(m.slots, (T, name))
+        return TypedSlot(length(m.slots) + 1, T)
+    end
 end
 
 ssatypes(m::LazyMethod) = getcodeinfo!(m).ssavaluetypes
@@ -341,6 +349,8 @@ end
 
 specialized_typeof{T}(::T) = T
 specialized_typeof{T}(::Type{T}) = Type{T}
+unspecialized_type{T}(::Type{Type{T}}) = T
+unspecialized_type{T}(::Type{T}) = T
 
 
 make_typed_slot(m, slot::SlotNumber) = TypedSlot(slot.id, slottype(m, slot))
@@ -416,69 +426,100 @@ function rewrite_ast(m, expr)
         end)
     end
     list = replace_expr(expr) do expr
-        if isa(expr, SlotNumber)
-            # lets make things simple and always use typed slots
-            typ = expr_type(m, expr)
-            push!(m, typ)
-            return true, TypedSlot(expr.id, typ)
-        elseif isa(expr, NewvarNode)
-            # seems like newvarnodes are redundant with the way we pre define
-            # slots, so we can drop them here! # TODO is this true?
-            return true, ()
-        elseif isa(expr, GlobalRef)
-            value = getfield(expr.mod, expr.name)
-            push!(m, specialized_typeof(value))
-            return true, value
-        elseif isa(expr, QuoteNode)
-            value = rewrite_quotenode(m, expr)
-            push!(m, specialized_typeof(value))
-            return true, value
-        elseif isa(expr, Expr)
-            args, head = expr.args, expr.head
-            if head == :(=)
-                lhs = make_typed_slot(m, args[1])
-                rhs = map(x-> rewrite_ast(m, x), args[2:end])
-                res = similar_expr(expr, [lhs, rhs...])
-                if !(lhs in m.decls) # if not already declared
-                    # DECLARE IT!
-                    push!(m.decls, lhs)
-                    typ = expr_type(m, lhs)
-                    decl = Expr(:(::), lhs, typ)
-                    decl.typ = typ
-                    push!(m, typ)
-                    return true, (decl, res) # splice in declaration
+        try
+            if isa(expr, SlotNumber)
+                # lets make things simple and always use typed slots
+                typ = expr_type(m, expr)
+                push!(m, typ)
+                return true, TypedSlot(expr.id, typ)
+            elseif isa(expr, SSAValue)
+                # lets make things simple and always use typed slots
+                typ = expr_type(m, expr)
+                push!(m, typ)
+                return true, make_typed_slot(m, expr)
+            elseif isa(expr, NewvarNode)
+                # seems like newvarnodes are redundant with the way we pre define
+                # slots, so we can drop them here! # TODO is this true?
+                return true, ()
+            elseif isa(expr, GlobalRef)
+                value = getfield(expr.mod, expr.name)
+                push!(m, specialized_typeof(value))
+                return true, value
+            elseif isa(expr, QuoteNode)
+                value = rewrite_quotenode(m, expr)
+                push!(m, specialized_typeof(value))
+                return true, value
+            elseif isa(expr, Expr)
+                args, head = expr.args, expr.head
+                if head == :(=)
+                    lhs = make_typed_slot(m, args[1])
+                    rhs = map(x-> rewrite_ast(m, x), args[2:end])
+                    res = similar_expr(expr, [lhs, rhs...])
+                    if !(lhs in m.decls) # if not already declared
+                        # DECLARE IT!
+                        push!(m.decls, lhs)
+                        typ = expr_type(m, lhs)
+                        decl = Expr(:(::), lhs, typ)
+                        decl.typ = typ
+                        push!(m, typ)
+                        return true, (decl, res) # splice in declaration
+                    end
+                    return true, res
+                elseif head == :call
+                    func = args[1]
+                    types = (map(x-> expr_type(m, x), args[2:end])...)
+                    FT = Sugar.expr_type(m, func)
+                    f = resolve_func(m, func)
+                    return_type = expr_type(m, expr)
+                    @assert isleaftype(return_type) "Found non concrete return type: $return_type"
+                    if f == typeof
+                        return true, LazyMethod(m, unspecialized_type(expr_type(m, expr)))
+                    end
+                    if f == Core._apply
+                        return true, rewrite_apply(m, types, expr)
+                    end
+                    lm = LazyMethod(m, f, types)
+                    assert_validity(lm) # lets try to catch errors as soon as possible!
+
+                    result = rewrite_function(lm, similar_expr(expr, args))
+                    # rewrite_function is allowed to fully eliminate function calls and return single values
+                    if isa(result, Expr)
+                        if result.head == :call # if still is a call
+                            lm = first(result.args)
+                            args, types = rewrite_vararg(lm, result.args, (map(x-> expr_type(m, x), result.args[2:end])...))
+                            args[1] = lm
+                            result = similar_expr(expr, args)
+                        end
+                        # recursively rewrite arguments
+                        result.args = map(x-> rewrite_ast(m, x), result.args)
+
+                    end
+                    return true, result
                 end
-                return true, res
-            elseif head == :call
-                func = args[1]
-                types = (map(x-> expr_type(m, x), args[2:end])...)
-                f = resolve_func(m, func)
-                if f == Core._apply
-                    return true, rewrite_apply(m, types, expr)
-                end
-                lm = LazyMethod(m, f, types)
-                assert_validity(lm) # lets try to catch errors as soon as possible!
-                args, types = rewrite_vararg(lm, args, types)
-                args[1] = lm
-                result = rewrite_function(lm, similar_expr(expr, args))
-                if isa(result, Expr)
-                    # recursively rewrite arguments
-                    result.args = map(x-> rewrite_ast(m, x), result.args)
-                end
-                return true, result
             end
-        end
-        # at this point, only values and expressions are left
-        # and we're only interested in catching the dependencies of values.
-        # Expr types to be expected: return, if/else, while/for,curly and so forth
-        if isa(expr, LazyMethod)
-            assert_validity(expr)
-            push!(m, expr)
-        elseif isa(expr, TypedSlot) || isa(expr, SSAValue)
-            push!(m, expr_type(m, expr))
-        # elseif isa(expr, DataType)
-        #     println(expr)
-        #     push!(m, specialized_typeof(expr))
+            # at this point, only values and expressions are left
+            # and we're only interested in catching the dependencies of values.
+            # Expr types to be expected: return, if/else, while/for,curly and so forth
+            if isa(expr, LazyMethod)
+                assert_validity(expr)
+                push!(m, expr)
+            elseif isa(expr, TypedSlot) || isa(expr, SSAValue)
+                push!(m, expr_type(m, expr))
+            # elseif isa(expr, DataType)
+            #     println(expr)
+            #     push!(m, specialized_typeof(expr))
+            end
+        catch e
+            println(STDERR, "___________________________________________________________________")
+            println(STDERR, "Error in Expr rewrite! This error might be ignored:")
+             # TODO filter errors, there are definitely errors that we can pick out that needs to be rethrown
+            println(STDERR, e)
+            println(STDERR, "happening in function tree:")
+            Sugar.print_stack_trace(STDERR, m)
+            println(STDERR)
+            println(STDERR, "Code of the context this error occured in: ")
+            println(STDERR, Sugar.sugared(m.signature..., code_typed))
+            println(STDERR, "___________________________________________________________________")
         end
         false, expr
     end
@@ -548,7 +589,6 @@ function remove_inlinenodes(expr::Expr, insertion)
 end
 
 
-
 function getfuncheader!(x::LazyMethod)
     if !isdefined(x, :funcheader)
         x.funcheader = if isfunction(x)
@@ -583,11 +623,16 @@ function gettypesource(x::LazyMethod)
 end
 
 function print_stack_trace(io, x::LazyMethod)
-    println(io, "in: ", x)
-    while isdefined(x, :parent)
+    println(io, "Sugar stack trace:")
+    i = 1
+    while true
+        println(io, "  [$i] ", x)
+        println(io)
+        i += 1
+        isdefined(x, :parent) || break
         x = x.parent
-        println(io, "   in: ", x)
     end
+    return
 end
 
 function getbodysource!(x::LazyMethod)
@@ -711,6 +756,22 @@ function get_func_expr(m::LazyMethod, expr::Expr, name = Symbol(getfunction(m)))
     )
 end
 
+
+function show_comment(io, comment)
+    println(io, "# ", comment)
+end
+
+function print_dependencies(io, method, visited = Set())
+    (method in visited) && return
+    push!(visited, method)
+    for elem in dependencies!(method)
+        print_dependencies(io, elem, visited)
+    end
+    isintrinsic(method) && return
+    show_comment(io, method.signature)
+    println(io, getsource!(method))
+end
+
 # interface for transpilers
 function typename end
 function _typename end
@@ -726,4 +787,6 @@ function show_type end
 function show_function end
 
 function supports_overloading end
-function vecname end
+function vecname(io::IO, T)
+    println(io, T)
+end
