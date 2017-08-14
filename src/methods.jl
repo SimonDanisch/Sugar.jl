@@ -125,6 +125,8 @@ function getslots!(m::LazyMethod)
             # TODO check if this is just because I mess up scope!
             if name == Symbol("#temp#")
                 name = Symbol("xtempx_", i)
+            elseif name == Symbol("#unused#")
+                name = Symbol("xunused_", i)
             end
             push!(slots, (T, name))
         end
@@ -138,7 +140,6 @@ slotnames(m::LazyMethod) = map(last, getslots!(m))
 
 slottype(m::LazyMethod, s::TypedSlot) = s.typ
 slottype(m::LazyMethod, s::Slot) = first(getslots!(m)[s.id - 1])
-
 slottype(m::LazyMethod, s::SSAValue) = ssatypes(m)[s.id + 1]
 
 slotname(tp::LazyMethod, s::SSAValue) = Sugar.ssavalue_name(s)
@@ -380,7 +381,7 @@ end
 Base.isvalid(x::LazyMethod) = exists(x) && isconcrete(x)
 
 function assert_validity(x::LazyMethod)
-    isvalid(x) || print_stack_trace(STDERR, x)
+    isvalid(x) && return
     if !isconcrete(x)
         throw(error("Method $x doesn't have concrete call types!"))
     end
@@ -505,9 +506,6 @@ function rewrite_ast(m, expr)
                 push!(m, expr)
             elseif isa(expr, TypedSlot) || isa(expr, SSAValue)
                 push!(m, expr_type(m, expr))
-            # elseif isa(expr, DataType)
-            #     println(expr)
-            #     push!(m, specialized_typeof(expr))
             end
         catch e
             println(STDERR, "___________________________________________________________________")
@@ -522,9 +520,10 @@ function rewrite_ast(m, expr)
             println(STDERR)
             println(STDERR, "Code of the context this error occured in: ")
             # we need to use `sugared` directly, since otherwise it will
-            # try to rewrite the expression an exactly run into this error while printing the error
+            # try to rewrite the expression and exactly run into this error while printing the error
             show_source(STDERR, m, Sugar.sugared(m.signature..., code_typed))
             println(STDERR)
+            display(catch_stacktrace())
             println(STDERR, "___________________________________________________________________")
         end
         false, expr
@@ -568,6 +567,9 @@ end
 function dependencies!(lm::LazyMethod, recursive = false)
     deps = OrderedSet{typeof(lm)}()
     if isfunction(lm)
+        for elem in to_tuple(lm.signature[2])
+            push!(lm, elem)
+        end
         getast!(lm) # walks ast && insertes dependencies
     else
         type_dependencies!(lm)
@@ -689,7 +691,7 @@ Type of an expression in the context of a LazyMethod
 expr_type(x) = expr_type(nothing, x)
 
 expr_type(lm, x::Expr) = x.typ
-expr_type(lm, x::GlobalRef) = typeof(eval(x))
+expr_type(lm, x::GlobalRef) = specialized_typeof(getfield(x.mod, x.name))
 expr_type{T}(lm, x::Type{T}) = Type{T}
 expr_type{T}(lm, x::T) = T
 expr_type(lm, x::InlineNode) = expr_type(lm, x.expression)
@@ -724,15 +726,7 @@ end
 resolve_func(m, f::AllFuncs) = f
 resolve_func{T}(m, X::Type{T}) = X
 resolve_func(m, f::Union{GlobalRef, Symbol}) = eval(f)
-function resolve_func(m, slot::Union{Slot, SSAValue})
-    try
-        instance(expr_type(m, slot))
-    catch e
-        println(expr_type(m, slot))
-        println(slotname(m, slot))
-        rethrow(e)
-    end
-end
+resolve_func(m, slot::Union{Slot, SSAValue}) = instance(expr_type(m, slot))
 function resolve_func(m, f::Expr)
     T = expr_type(m, f)
     if T <: AllFuncs
@@ -787,12 +781,24 @@ function print_dependencies(io, method, visited = Set())
         print_dependencies(io, elem, visited)
     end
     isintrinsic(method) && return
-    show_comment(io, method.signature)
-    println(io, getsource!(method))
+    try
+        show_comment(io, method.signature)
+        println(io, getsource!(method))
+    catch e
+        println(STDERR, "___________________________________________________________________")
+        println(STDERR, "Can't compile dependency: $(method.signature)")
+         # TODO filter errors, there are definitely errors that we can pick out that needs to be rethrown
+        println(STDERR, e)
+        display(catch_stacktrace())
+        println(STDERR, "happening in function tree:")
+        Sugar.print_stack_trace(STDERR, method)
+        println(STDERR)
+        println(STDERR, "___________________________________________________________________")
+    end
 end
 
 # interface for transpilers
-function typename end
+typename(io::IO, T) = string(T)
 function _typename end
 function functionname(io::IO, lm::LazyMethod)
     if isfunction(lm)
