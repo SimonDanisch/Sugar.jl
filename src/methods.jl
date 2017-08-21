@@ -476,6 +476,11 @@ function rewrite_ast(m, expr)
                     if f == typeof
                         return true, LazyMethod(m, unspecialized_type(expr_type(m, expr)))
                     end
+                    if f == isa
+                        T1 = expr_type(m, expr.args[2])
+                        T2 = unspecialized_type(expr_type(m, expr.args[3]))
+                        return true, (T1 <: T2)
+                    end
                     if f == Core._apply
                         return true, rewrite_apply(m, types, expr)
                     end
@@ -511,7 +516,7 @@ function rewrite_ast(m, expr)
             println(STDERR, "___________________________________________________________________")
             println(STDERR, "Error in Expr rewrite! This error might be ignored:")
              # TODO filter errors, there are definitely errors that we can pick out that needs to be rethrown
-            println(STDERR, e)
+            showerror(STDERR, e)
             println(STDERR, "Expression resulting in the error: ")
             show_source(STDERR, m, expr)
             println(STDERR)
