@@ -104,7 +104,7 @@ function _normalize_ast(expr::Expr)
         if Sugar.isa_applytype(f)
             args = expr.args[2:end]
             T = applytype_type(f, args)
-            return true, similar_expr(expr, vcat(T, map(normalize_ast, args)))
+            return true, similar_expr(expr, [T])
         end
         return true, similar_expr(expr, map(normalize_ast, expr.args))
     end

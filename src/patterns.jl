@@ -32,15 +32,18 @@ function is_unless_goto(goto, hist, histpos)
 end
 
 save_resolve_func(x) = nothing
-save_resolve_func(f::AllFuncs) = f
-save_resolve_func{T}(::Type{T}) = T
-save_resolve_func(f::Union{GlobalRef, Symbol}) = eval(f)
+save_resolve_func(x::Symbol) = x
+save_resolve_func(f::AllFuncs) = Symbol(f)
+function save_resolve_func(f::GlobalRef)
+    # We only care about base methods for our pattern matching control flow rewrite
+    f.mod in (Base, Core, Main) ? f.name : nothing
+end
 
 function iscolon(expr)
     isa(expr, Expr) && expr.head == :(=) || return false
     lhs, rhs = expr.args
     isa(rhs, Expr) && rhs.head == :call || return false
-    save_resolve_func(rhs.args[1]) == colon || return false
+    save_resolve_func(rhs.args[1]) == :colon || return false
     return true
 end
 
@@ -48,7 +51,7 @@ function isstart(expr, hist)
     isa(expr, Expr) && expr.head == :(=) || return false
     lhs, rhs = expr.args
     isa(rhs, Expr) && rhs.head == :call || return false
-    save_resolve_func(rhs.args[1]) == start || return false
+    save_resolve_func(rhs.args[1]) == :start || return false
     colon = hist[1][1]
     slot = colon.args[1]
     slotstart = rhs.args[2]
@@ -59,7 +62,7 @@ function isnext(expr, hist)
     isa(expr, Expr) && expr.head == :(=) || return false
     lhs, rhs = expr.args
     isa(rhs, Expr) && rhs.head == :call || return false
-    save_resolve_func(rhs.args[1]) == next || return false
+    save_resolve_func(rhs.args[1]) == :next || return false
     colon = hist[1][1]; slot = colon.args[1]
     slotnext = rhs.args[2]
     slot == slotnext || return false
@@ -69,10 +72,10 @@ function is_done_unless(expr, hist)
     Sugar.isunless(expr) || return false
     condition = expr.args[1]
     isa(condition, Expr) && condition.head == :call || return false
-    save_resolve_func(condition.args[1]) == (!) || return false
+    save_resolve_func(condition.args[1]) == :(!) || return false
     done_expr = condition.args[2]
     isa(done_expr, Expr) && done_expr.head == :call || return false
-    save_resolve_func(done_expr.args[1]) == done || return false
+    save_resolve_func(done_expr.args[1]) == :done || return false
     colon = hist[1][1]; slot = colon.args[1]
     slotdone = done_expr.args[2]
     slot == slotdone || return false
@@ -82,7 +85,7 @@ function isgetfield(expr, slotnext)
     isa(expr, Expr) && expr.head == :(=) || return false
     lhs, rhs = expr.args
     isa(rhs, Expr) && rhs.head == :call || return false
-    save_resolve_func(rhs.args[1]) == getfield || return false
+    save_resolve_func(rhs.args[1]) == :getfield || return false
     slot = rhs.args[2]
     slot == slotnext || return false
     return true
