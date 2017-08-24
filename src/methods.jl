@@ -106,7 +106,7 @@ function newslot!(m, T, name = gensym())
     if idx > 0
         # means we already have a slot with this name, which we can use.
         # This needs to be treated with care, since it might also be a clash
-        return TypedSlot(idx, T)
+        return TypedSlot(idx + 1, T)
     else
         push!(m.slots, (T, name))
         return TypedSlot(length(m.slots) + 1, T)
@@ -280,8 +280,8 @@ Unrole `Core._apply`
 function rewrite_apply(m, types, expr)
     orig_expr = expr
     apply_args = expr.args[2:end]
-    if types[1] <: AllFuncs && all(x-> x <: Tuple, types[2:end])
-        to_apply = instance(types[1])
+    to_apply = resolve_func(m, expr.args[2])
+    if all(x-> x <: Tuple, types[2:end])
         argtuple = apply_args[2:end]
         tuple_len = length(argtuple)
         # assign to tmp, in case it's  not a variable and instead a constructor expression
@@ -323,10 +323,9 @@ function rewrite_apply(m, types, expr)
             tup_expr = rewrite_ast(m, tup_expr)
             expr.args = [expr.args[1:n]..., tup_expr]
         end
-        InlineNode(tmp_exprs, expr)
-    else
-        error("Unknown _apply construct. Found: $expr")
+        return InlineNode(tmp_exprs, expr)
     end
+    error("Unknown _apply construct. Found: $expr")
 end
 
 if isdefined(Base, :LambdaInfo)
@@ -413,19 +412,26 @@ and infers the dependencies of an expression
 function rewrite_ast(m, expr)
     istype(m) && return expr
     sparams = get_static_parameters(m)
-    if !isempty(sparams)
-        # needs to be done in a first pass for now, since the next step relies on
-        # all static params being resolved!s
-        expr = first(replace_expr(expr) do expr
-            if isa(expr, Expr) && expr.head == :static_parameter
+    # needs to be done in a first pass for now, since the next step relies on
+    # all static params being resolved!s
+    expr = first(replace_expr(expr) do expr
+        if isa(expr, Expr)
+            if expr.head == :static_parameter
                 param = sparams[expr.args[1]]
                 push!(m, specialized_typeof(param))
-                true, param
+                return true, param
             else
-                false, expr
+                T = expr.typ
+                if T <: Tuple
+                    types = to_tuple(T)
+                    if any(x-> x == DataType, types) && expr.head == :call && expr.args[1] == GlobalRef(Core, :tuple)
+                        expr.typ = Tuple{map(x-> Sugar.expr_type(m, x), expr.args[2:end])...}
+                    end
+                end
             end
-        end)
-    end
+        end
+        false, expr
+    end)
     list = replace_expr(expr) do expr
         try
             if isa(expr, SlotNumber)
@@ -517,6 +523,7 @@ function rewrite_ast(m, expr)
             println(STDERR, "Error in Expr rewrite! This error might be ignored:")
              # TODO filter errors, there are definitely errors that we can pick out that needs to be rethrown
             showerror(STDERR, e)
+            println(STDERR)
             println(STDERR, "Expression resulting in the error: ")
             show_source(STDERR, m, expr)
             println(STDERR)
@@ -558,7 +565,11 @@ function type_dependencies!(lm::LazyMethod)
     typ = lm.signature
     if isleaftype(typ) || isa(typ, Type)
         for name in fieldnames(typ)
-            push!(lm, fieldtype(typ, name))
+            ft = fieldtype(typ, name)
+            # Tuples can be types that are not possible to instantiate, e.g. Tuple{1, 1}
+            if !(typ <: Tuple && !isa(ft, DataType))
+                push!(lm, ft)
+            end
         end
         for T in typ.parameters
             isa(T, DataType) && push!(lm, T)
