@@ -101,8 +101,16 @@ function getcodeinfo!(x::LazyMethod)
 end
 
 function newslot!(m, T, name = gensym())
-    push!(m.slots, (T, name))
-    TypedSlot(length(m.slots) + 1, T)
+    slot = (T, name)
+    idx = findfirst(m.slots, slot)
+    if idx > 0
+        # means we already have a slot with this name, which we can use.
+        # This needs to be treated with care, since it might also be a clash
+        return TypedSlot(idx + 1, T)
+    else
+        push!(m.slots, (T, name))
+        return TypedSlot(length(m.slots) + 1, T)
+    end
 end
 
 ssatypes(m::LazyMethod) = getcodeinfo!(m).ssavaluetypes
@@ -117,6 +125,8 @@ function getslots!(m::LazyMethod)
             # TODO check if this is just because I mess up scope!
             if name == Symbol("#temp#")
                 name = Symbol("xtempx_", i)
+            elseif name == Symbol("#unused#")
+                name = Symbol("xunused_", i)
             end
             push!(slots, (T, name))
         end
@@ -130,7 +140,6 @@ slotnames(m::LazyMethod) = map(last, getslots!(m))
 
 slottype(m::LazyMethod, s::TypedSlot) = s.typ
 slottype(m::LazyMethod, s::Slot) = first(getslots!(m)[s.id - 1])
-
 slottype(m::LazyMethod, s::SSAValue) = ssatypes(m)[s.id + 1]
 
 slotname(tp::LazyMethod, s::SSAValue) = Sugar.ssavalue_name(s)
@@ -271,8 +280,8 @@ Unrole `Core._apply`
 function rewrite_apply(m, types, expr)
     orig_expr = expr
     apply_args = expr.args[2:end]
-    if types[1] <: AllFuncs && all(x-> x <: Tuple, types[2:end])
-        to_apply = instance(types[1])
+    to_apply = resolve_func(m, expr.args[2])
+    if all(x-> x <: Tuple, types[2:end])
         argtuple = apply_args[2:end]
         tuple_len = length(argtuple)
         # assign to tmp, in case it's  not a variable and instead a constructor expression
@@ -314,10 +323,9 @@ function rewrite_apply(m, types, expr)
             tup_expr = rewrite_ast(m, tup_expr)
             expr.args = [expr.args[1:n]..., tup_expr]
         end
-        InlineNode(tmp_exprs, expr)
-    else
-        error("Unknown _apply construct. Found: $expr")
+        return InlineNode(tmp_exprs, expr)
     end
+    error("Unknown _apply construct. Found: $expr")
 end
 
 if isdefined(Base, :LambdaInfo)
@@ -341,6 +349,8 @@ end
 
 specialized_typeof{T}(::T) = T
 specialized_typeof{T}(::Type{T}) = Type{T}
+unspecialized_type{T}(::Type{Type{T}}) = T
+unspecialized_type{T}(::Type{T}) = T
 
 
 make_typed_slot(m, slot::SlotNumber) = TypedSlot(slot.id, slottype(m, slot))
@@ -370,7 +380,7 @@ end
 Base.isvalid(x::LazyMethod) = exists(x) && isconcrete(x)
 
 function assert_validity(x::LazyMethod)
-    isvalid(x) || print_stack_trace(STDERR, x)
+    isvalid(x) && return
     if !isconcrete(x)
         throw(error("Method $x doesn't have concrete call types!"))
     end
@@ -402,83 +412,131 @@ and infers the dependencies of an expression
 function rewrite_ast(m, expr)
     istype(m) && return expr
     sparams = get_static_parameters(m)
-    if !isempty(sparams)
-        # needs to be done in a first pass for now, since the next step relies on
-        # all static params being resolved!s
-        expr = first(replace_expr(expr) do expr
-            if isa(expr, Expr) && expr.head == :static_parameter
+    # needs to be done in a first pass for now, since the next step relies on
+    # all static params being resolved!s
+    expr = first(replace_expr(expr) do expr
+        if isa(expr, Expr)
+            if expr.head == :static_parameter
                 param = sparams[expr.args[1]]
                 push!(m, specialized_typeof(param))
-                true, param
+                return true, param
             else
-                false, expr
-            end
-        end)
-    end
-    list = replace_expr(expr) do expr
-        if isa(expr, SlotNumber)
-            # lets make things simple and always use typed slots
-            typ = expr_type(m, expr)
-            push!(m, typ)
-            return true, TypedSlot(expr.id, typ)
-        elseif isa(expr, NewvarNode)
-            # seems like newvarnodes are redundant with the way we pre define
-            # slots, so we can drop them here! # TODO is this true?
-            return true, ()
-        elseif isa(expr, GlobalRef)
-            value = getfield(expr.mod, expr.name)
-            push!(m, specialized_typeof(value))
-            return true, value
-        elseif isa(expr, QuoteNode)
-            value = rewrite_quotenode(m, expr)
-            push!(m, specialized_typeof(value))
-            return true, value
-        elseif isa(expr, Expr)
-            args, head = expr.args, expr.head
-            if head == :(=)
-                lhs = make_typed_slot(m, args[1])
-                rhs = map(x-> rewrite_ast(m, x), args[2:end])
-                res = similar_expr(expr, [lhs, rhs...])
-                if !(lhs in m.decls) # if not already declared
-                    # DECLARE IT!
-                    push!(m.decls, lhs)
-                    typ = expr_type(m, lhs)
-                    decl = Expr(:(::), lhs, typ)
-                    decl.typ = typ
-                    push!(m, typ)
-                    return true, (decl, res) # splice in declaration
+                T = expr.typ
+                if T <: Tuple
+                    types = to_tuple(T)
+                    if any(x-> x == DataType, types) && expr.head == :call && expr.args[1] == GlobalRef(Core, :tuple)
+                        expr.typ = Tuple{map(x-> Sugar.expr_type(m, x), expr.args[2:end])...}
+                    end
                 end
-                return true, res
-            elseif head == :call
-                func = args[1]
-                types = (map(x-> expr_type(m, x), args[2:end])...)
-                f = resolve_func(m, func)
-                if f == Core._apply
-                    return true, rewrite_apply(m, types, expr)
-                end
-                lm = LazyMethod(m, f, types)
-                assert_validity(lm) # lets try to catch errors as soon as possible!
-                args, types = rewrite_vararg(lm, args, types)
-                args[1] = lm
-                result = rewrite_function(lm, similar_expr(expr, args))
-                if isa(result, Expr)
-                    # recursively rewrite arguments
-                    result.args = map(x-> rewrite_ast(m, x), result.args)
-                end
-                return true, result
             end
         end
-        # at this point, only values and expressions are left
-        # and we're only interested in catching the dependencies of values.
-        # Expr types to be expected: return, if/else, while/for,curly and so forth
-        if isa(expr, LazyMethod)
-            assert_validity(expr)
-            push!(m, expr)
-        elseif isa(expr, TypedSlot) || isa(expr, SSAValue)
-            push!(m, expr_type(m, expr))
-        # elseif isa(expr, DataType)
-        #     println(expr)
-        #     push!(m, specialized_typeof(expr))
+        false, expr
+    end)
+    list = replace_expr(expr) do expr
+        try
+            if isa(expr, SlotNumber)
+                # lets make things simple and always use typed slots
+                typ = expr_type(m, expr)
+                push!(m, typ)
+                return true, TypedSlot(expr.id, typ)
+            elseif isa(expr, SSAValue)
+                # lets make things simple and always use typed slots
+                typ = expr_type(m, expr)
+                push!(m, typ)
+                return true, make_typed_slot(m, expr)
+            elseif isa(expr, NewvarNode)
+                # seems like newvarnodes are redundant with the way we pre define
+                # slots, so we can drop them here! # TODO is this true?
+                return true, ()
+            elseif isa(expr, GlobalRef)
+                value = getfield(expr.mod, expr.name)
+                push!(m, specialized_typeof(value))
+                return true, value
+            elseif isa(expr, QuoteNode)
+                value = rewrite_quotenode(m, expr)
+                push!(m, specialized_typeof(value))
+                return true, value
+            elseif isa(expr, Expr)
+                args, head = expr.args, expr.head
+                if head == :(=)
+                    lhs = make_typed_slot(m, args[1])
+                    rhs = map(x-> rewrite_ast(m, x), args[2:end])
+                    res = similar_expr(expr, [lhs, rhs...])
+                    if !(lhs in m.decls) # if not already declared
+                        # DECLARE IT!
+                        push!(m.decls, lhs)
+                        typ = expr_type(m, lhs)
+                        decl = Expr(:(::), lhs, typ)
+                        decl.typ = typ
+                        push!(m, typ)
+                        return true, (decl, res) # splice in declaration
+                    end
+                    return true, res
+                elseif head == :call
+                    func = args[1]
+                    types = (map(x-> expr_type(m, x), args[2:end])...)
+                    FT = Sugar.expr_type(m, func)
+                    f = resolve_func(m, func)
+                    return_type = expr_type(m, expr)
+                    @assert isleaftype(return_type) "Found non concrete return type: $return_type"
+                    if f == typeof
+                        return true, LazyMethod(m, unspecialized_type(expr_type(m, expr)))
+                    end
+                    if f == isa
+                        T1 = expr_type(m, expr.args[2])
+                        T2 = unspecialized_type(expr_type(m, expr.args[3]))
+                        return true, (T1 <: T2)
+                    end
+                    if f == Core._apply
+                        return true, rewrite_apply(m, types, expr)
+                    end
+                    lm = LazyMethod(m, f, types)
+                    assert_validity(lm) # lets try to catch errors as soon as possible!
+
+                    result = rewrite_function(lm, similar_expr(expr, args))
+                    # rewrite_function is allowed to fully eliminate function calls and return single values
+                    if isa(result, Expr)
+                        if result.head == :call # if still is a call
+                            lm = first(result.args)
+                            args, types = rewrite_vararg(lm, result.args, (map(x-> expr_type(m, x), result.args[2:end])...))
+                            args[1] = lm
+                            result = similar_expr(expr, args)
+                        end
+                        # recursively rewrite arguments
+                        result.args = map(x-> rewrite_ast(m, x), result.args)
+
+                    end
+                    return true, result
+                end
+            end
+            # at this point, only values and expressions are left
+            # and we're only interested in catching the dependencies of values.
+            # Expr types to be expected: return, if/else, while/for,curly and so forth
+            if isa(expr, LazyMethod)
+                assert_validity(expr)
+                push!(m, expr)
+            elseif isa(expr, TypedSlot) || isa(expr, SSAValue)
+                push!(m, expr_type(m, expr))
+            end
+        catch e
+            println(STDERR, "___________________________________________________________________")
+            println(STDERR, "Error in Expr rewrite! This error might be ignored:")
+             # TODO filter errors, there are definitely errors that we can pick out that needs to be rethrown
+            showerror(STDERR, e)
+            println(STDERR)
+            println(STDERR, "Expression resulting in the error: ")
+            show_source(STDERR, m, expr)
+            println(STDERR)
+            println(STDERR, "happening in function tree:")
+            Sugar.print_stack_trace(STDERR, m)
+            println(STDERR)
+            println(STDERR, "Code of the context this error occured in: ")
+            # we need to use `sugared` directly, since otherwise it will
+            # try to rewrite the expression and exactly run into this error while printing the error
+            show_source(STDERR, m, Sugar.sugared(m.signature..., code_typed))
+            println(STDERR)
+            display(catch_stacktrace())
+            println(STDERR, "___________________________________________________________________")
         end
         false, expr
     end
@@ -490,11 +548,28 @@ function rewrite_ast(m, expr)
     end
 end
 
+function show_source(io::IO, m::LazyMethod, body = getast!(m))
+    src = getcodeinfo!(m)
+    emph_io = Base.IOContext(io, :TYPEEMPHASIZE => true)
+    sn = ["self", String.(Sugar.slotnames(m))...]
+    Base.show_unquoted(
+        Base.IOContext(
+            Base.IOContext(emph_io, :SOURCEINFO => src),
+            :SOURCE_SLOTNAMES => sn
+        ),
+        body, 2
+    )
+end
+
 function type_dependencies!(lm::LazyMethod)
     typ = lm.signature
     if isleaftype(typ) || isa(typ, Type)
         for name in fieldnames(typ)
-            push!(lm, fieldtype(typ, name))
+            ft = fieldtype(typ, name)
+            # Tuples can be types that are not possible to instantiate, e.g. Tuple{1, 1}
+            if !(typ <: Tuple && !isa(ft, DataType))
+                push!(lm, ft)
+            end
         end
         for T in typ.parameters
             isa(T, DataType) && push!(lm, T)
@@ -508,6 +583,9 @@ end
 function dependencies!(lm::LazyMethod, recursive = false)
     deps = OrderedSet{typeof(lm)}()
     if isfunction(lm)
+        for elem in to_tuple(lm.signature[2])
+            push!(lm, elem)
+        end
         getast!(lm) # walks ast && insertes dependencies
     else
         type_dependencies!(lm)
@@ -548,7 +626,6 @@ function remove_inlinenodes(expr::Expr, insertion)
 end
 
 
-
 function getfuncheader!(x::LazyMethod)
     if !isdefined(x, :funcheader)
         x.funcheader = if isfunction(x)
@@ -583,11 +660,16 @@ function gettypesource(x::LazyMethod)
 end
 
 function print_stack_trace(io, x::LazyMethod)
-    println(io, "in: ", x)
-    while isdefined(x, :parent)
+    println(io, "Sugar stack trace:")
+    i = 1
+    while true
+        println(io, "  [$i] ", x)
+        println(io)
+        i += 1
+        isdefined(x, :parent) || break
         x = x.parent
-        println(io, "   in: ", x)
     end
+    return
 end
 
 function getbodysource!(x::LazyMethod)
@@ -625,7 +707,7 @@ Type of an expression in the context of a LazyMethod
 expr_type(x) = expr_type(nothing, x)
 
 expr_type(lm, x::Expr) = x.typ
-expr_type(lm, x::GlobalRef) = typeof(eval(x))
+expr_type(lm, x::GlobalRef) = specialized_typeof(getfield(x.mod, x.name))
 expr_type{T}(lm, x::Type{T}) = Type{T}
 expr_type{T}(lm, x::T) = T
 expr_type(lm, x::InlineNode) = expr_type(lm, x.expression)
@@ -660,15 +742,7 @@ end
 resolve_func(m, f::AllFuncs) = f
 resolve_func{T}(m, X::Type{T}) = X
 resolve_func(m, f::Union{GlobalRef, Symbol}) = eval(f)
-function resolve_func(m, slot::Union{Slot, SSAValue})
-    try
-        instance(expr_type(m, slot))
-    catch e
-        println(expr_type(m, slot))
-        println(slotname(m, slot))
-        rethrow(e)
-    end
-end
+resolve_func(m, slot::Union{Slot, SSAValue}) = instance(expr_type(m, slot))
 function resolve_func(m, f::Expr)
     T = expr_type(m, f)
     if T <: AllFuncs
@@ -711,8 +785,36 @@ function get_func_expr(m::LazyMethod, expr::Expr, name = Symbol(getfunction(m)))
     )
 end
 
+
+function show_comment(io, comment)
+    println(io, "# ", comment)
+end
+
+function print_dependencies(io, method, visited = Set())
+    (method in visited) && return
+    push!(visited, method)
+    for elem in dependencies!(method)
+        print_dependencies(io, elem, visited)
+    end
+    isintrinsic(method) && return
+    try
+        show_comment(io, method.signature)
+        println(io, getsource!(method))
+    catch e
+        println(STDERR, "___________________________________________________________________")
+        println(STDERR, "Can't compile dependency: $(method.signature)")
+         # TODO filter errors, there are definitely errors that we can pick out that needs to be rethrown
+        println(STDERR, e)
+        display(catch_stacktrace())
+        println(STDERR, "happening in function tree:")
+        Sugar.print_stack_trace(STDERR, method)
+        println(STDERR)
+        println(STDERR, "___________________________________________________________________")
+    end
+end
+
 # interface for transpilers
-function typename end
+typename(io::IO, T) = string(T)
 function _typename end
 function functionname(io::IO, lm::LazyMethod)
     if isfunction(lm)
@@ -726,4 +828,6 @@ function show_type end
 function show_function end
 
 function supports_overloading end
-function vecname end
+function vecname(io::IO, T)
+    println(io, T)
+end
