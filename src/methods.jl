@@ -214,10 +214,9 @@ function getfuncargs(x::LazyMethod)
             argtype, name = slots[i]
             # Slot types might be less specific, e.g. when the variable is unused it might end up as Any.
             # but generally the slot type is the correct one, especially in the context of varargs.
-            calltype = if !isleaftype(argtype) && length(calltypes) <= i
+            if !isleaftype(argtype) && length(calltypes) >= i
                 argtype = calltypes[i]
             end
-
             expr = :($(name)::$(argtype))
             expr.typ = argtype
             expr
@@ -422,7 +421,7 @@ function rewrite_ast(m, expr)
                 return true, param
             else
                 T = expr.typ
-                if T <: Tuple
+                if T <: Tuple && T != Union{}
                     types = to_tuple(T)
                     if any(x-> x == DataType, types) && expr.head == :call && expr.args[1] == GlobalRef(Core, :tuple)
                         expr.typ = Tuple{map(x-> Sugar.expr_type(m, x), expr.args[2:end])...}
@@ -520,9 +519,8 @@ function rewrite_ast(m, expr)
             end
         catch e
             println(STDERR, "___________________________________________________________________")
-            println(STDERR, "Error in Expr rewrite! This error might be ignored:")
+            println(STDERR, "Error in Expr rewrite:")
              # TODO filter errors, there are definitely errors that we can pick out that needs to be rethrown
-            showerror(STDERR, e)
             println(STDERR)
             println(STDERR, "Expression resulting in the error: ")
             show_source(STDERR, m, expr)
@@ -534,9 +532,7 @@ function rewrite_ast(m, expr)
             # we need to use `sugared` directly, since otherwise it will
             # try to rewrite the expression and exactly run into this error while printing the error
             show_source(STDERR, m, Sugar.sugared(m.signature..., code_typed))
-            println(STDERR)
-            display(catch_stacktrace())
-            println(STDERR, "___________________________________________________________________")
+            rethrow(e)
         end
         false, expr
     end
@@ -575,7 +571,6 @@ function type_dependencies!(lm::LazyMethod)
             isa(T, DataType) && push!(lm, T)
         end
     else
-        print_stack_trace(STDERR, lm)
         error("Found non concrete type: $(lm.signature)")
     end
 end
@@ -673,26 +668,16 @@ function print_stack_trace(io, x::LazyMethod)
 end
 
 function getbodysource!(x::LazyMethod)
-    try
-        if istype(x)
-            gettypesource(x)
-        else
-            getfuncsource(x)
-        end
-    catch e
-        print_stack_trace(STDERR, x)
-        rethrow(e)
+    if istype(x)
+        gettypesource(x)
+    else
+        getfuncsource(x)
     end
 end
 
 function getsource!(x::LazyMethod)
     if !isdefined(x, :source)
-        try
-            str = getbodysource!(x)
-        catch e
-            print_stack_trace(STDERR, x)
-            rethrow(e)
-        end
+        str = getbodysource!(x)
         if isfunction(x)
             str = getfuncheader!(x) * "\n" * str
         end
@@ -797,20 +782,8 @@ function print_dependencies(io, method, visited = Set())
         print_dependencies(io, elem, visited)
     end
     isintrinsic(method) && return
-    try
-        show_comment(io, method.signature)
-        println(io, getsource!(method))
-    catch e
-        println(STDERR, "___________________________________________________________________")
-        println(STDERR, "Can't compile dependency: $(method.signature)")
-         # TODO filter errors, there are definitely errors that we can pick out that needs to be rethrown
-        println(STDERR, e)
-        display(catch_stacktrace())
-        println(STDERR, "happening in function tree:")
-        Sugar.print_stack_trace(STDERR, method)
-        println(STDERR)
-        println(STDERR, "___________________________________________________________________")
-    end
+    show_comment(io, method.signature)
+    println(io, getsource!(method))
 end
 
 # interface for transpilers
