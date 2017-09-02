@@ -422,8 +422,13 @@ function rewrite_ast(m, expr)
                 return true, param
             else
                 T = expr.typ
-                if T <: Tuple
-                    types = to_tuple(T)
+                if T <: Tuple && T != Union{}
+                    types = try
+                        to_tuple(T)
+                    catch e
+                        print_stack_trace(STDOUT, m)
+                        rethrow(e)
+                    end
                     if any(x-> x == DataType, types) && expr.head == :call && expr.args[1] == GlobalRef(Core, :tuple)
                         expr.typ = Tuple{map(x-> Sugar.expr_type(m, x), expr.args[2:end])...}
                     end
@@ -478,7 +483,6 @@ function rewrite_ast(m, expr)
                     FT = Sugar.expr_type(m, func)
                     f = resolve_func(m, func)
                     return_type = expr_type(m, expr)
-                    @assert isleaftype(return_type) "Found non concrete return type: $return_type"
                     if f == typeof
                         return true, LazyMethod(m, unspecialized_type(expr_type(m, expr)))
                     end
@@ -490,6 +494,21 @@ function rewrite_ast(m, expr)
                     if f == Core._apply
                         return true, rewrite_apply(m, types, expr)
                     end
+                    if f == Base.throw
+                        return true, ()
+                    end
+                    if f == typeassert
+                        @assert length(expr.args) == 3
+                        args = expr.args[2:end]
+                        # typeassert(::T, Type{T}) where T
+                        aT, bT = Sugar.expr_type.(m, args)
+                        if aT != unspecialized_type(bT)
+                            error("Typeassert failed: found type $aT, needs to be $(unspecialized_type(bT))")
+                        end
+                        res = rewrite_ast(m, expr.args[2])
+                        return true, res
+                    end
+                    @assert isleaftype(return_type) "Found non concrete return type: $return_type"
                     lm = LazyMethod(m, f, types)
                     assert_validity(lm) # lets try to catch errors as soon as possible!
 
@@ -504,7 +523,6 @@ function rewrite_ast(m, expr)
                         end
                         # recursively rewrite arguments
                         result.args = map(x-> rewrite_ast(m, x), result.args)
-
                     end
                     return true, result
                 end
@@ -522,7 +540,6 @@ function rewrite_ast(m, expr)
             println(STDERR, "___________________________________________________________________")
             println(STDERR, "Error in Expr rewrite! This error might be ignored:")
              # TODO filter errors, there are definitely errors that we can pick out that needs to be rethrown
-            showerror(STDERR, e)
             println(STDERR)
             println(STDERR, "Expression resulting in the error: ")
             show_source(STDERR, m, expr)
@@ -535,8 +552,7 @@ function rewrite_ast(m, expr)
             # try to rewrite the expression and exactly run into this error while printing the error
             show_source(STDERR, m, Sugar.sugared(m.signature..., code_typed))
             println(STDERR)
-            display(catch_stacktrace())
-            println(STDERR, "___________________________________________________________________")
+            rethrow(e)
         end
         false, expr
     end
