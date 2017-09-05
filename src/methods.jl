@@ -609,6 +609,10 @@ function dependencies!(lm::LazyMethod, recursive = false)
         for elem in to_tuple(lm.signature[2])
             push!(lm, elem)
         end
+        RT = returntype(lm)
+        if isa(RT, DataType) && RT != Void && RT != Union{}
+            push!(lm, RT)
+        end
         getast!(lm) # walks ast && insertes dependencies
     else
         type_dependencies!(lm)
