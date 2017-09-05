@@ -33,7 +33,7 @@ LazyMethod{T}(lm::LazyMethod{T}, t) = LazyMethod{T}(t, lm, lm.cache)
 
 
 LazyMethod(signature::DataType) = LazyMethod{:JL}(signature)
-LazyMethod(f::AllFuncs, types) = LazyMethod{:JL}((f, Base.to_tuple_type(types)))
+LazyMethod(f, types) = LazyMethod{:JL}((f, Base.to_tuple_type(types)))
 
 
 function isfunction(x::LazyMethod)
@@ -773,7 +773,11 @@ function resolve_func(m, slot::Union{Slot, SSAValue})
     if isclosure(f)
         return resolve_func(m, f)
     else
-        instance(f)
+        if f <: AllFuncs
+            instance(f)
+        else
+            resolve_func(m, f)
+        end
     end
 end
 function resolve_func(m, f::Expr)
