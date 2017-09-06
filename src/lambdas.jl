@@ -137,6 +137,15 @@ end
 function get_method(f, types::Type)
     get_method(f, (types.parameters...))
 end
+function get_method(ftype::DataType, types::Tuple)
+    world = typemax(UInt)
+    if !isclosure(ftype)
+        ftype = Type{ftype}
+    end
+    tt = Tuple{ftype, to_tuple(types)...}
+    (ti, env, meth) = Base._methods_by_ftype(tt, 1, world)[1]
+    Base.func_for_method_checked(meth, tt)
+end
 function get_method(f, types::Tuple)
     if !all(isleaftype, types)
         error("Not all types are concrete: $types")

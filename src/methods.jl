@@ -141,7 +141,7 @@ slottype(m::LazyMethod, s::TypedSlot) = s.typ
 slottype(m::LazyMethod, s::Slot) = first(getslots!(m)[s.id])
 slottype(m::LazyMethod, s::SSAValue) = ssatypes(m)[s.id + 1]
 
-slotname(tp::LazyMethod, s::SSAValue) = Sugar.ssavalue_name(s)
+slotname(tp::LazyMethod, s::SSAValue) = ssavalue_name(s)
 function slotname(m::LazyMethod, s::Slot)
     slots = getslots!(m)
     id = s.id
@@ -819,7 +819,20 @@ end
 
 function get_func_expr(m::LazyMethod, expr::Expr, name = Symbol(getfunction(m)))
     body = replace_slots(m, expr)
-    args = getfuncargs(m)
+    functype = m.signature[1]
+    calltypes, slots = to_tuple(m.signature[2]), getslots!(m)
+    n = method_nargs(m)
+    args = map(2:n) do i
+        argtype, name = slots[i]
+        # Slot types might be less specific, e.g. when the variable is unused it might end up as Any.
+        # but generally the slot type is the correct one, especially in the context of varargs.
+        calltype = if !isleaftype(argtype) && length(calltypes) <= i
+            argtype = calltypes[i - 1]
+        end
+        expr = :($(name)::$(argtype))
+        expr.typ = argtype
+        expr
+    end
     Expr(:function,
         Expr(:call, name, args...),
         body
