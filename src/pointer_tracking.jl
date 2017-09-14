@@ -75,26 +75,22 @@ function track_types!(m, expr::Expr, pointer_map)
         pointer_map[expr] = ptrs
     elseif head in (:call, :curly) # curly and call are both call like
         f_args = @view args[2:end]
-        args_need_tracking = false
+        args_need_tracking = true
         ptrs = []
         trackers = Dict()
-        for i = 1:length(f_args)
-            arg = f_args[i]
-            T = expr_type(m, arg)
-            if needs_tracking(m, T)
-                track_types!(m, arg, pointer_map)
-                haskey(pointer_map, arg) && push_app!(ptrs, pointer_map[arg])
-                args_need_tracking = true
-                trackers[TypedSlot(i + 1, T)] = get(pointer_map, arg, :failed_tracking)
-            end
-        end
         @assert isa(args[1], LazyMethod)
         f = resolve_func(m, args[1])
         m2 = args[1]
-        m2.cache[:tracked_types] = trackers
-        if args_need_tracking # if args get pointers passed, we need to track the method
-            track_types!(m2, getast!(m2), trackers)
+        for i = 1:length(f_args)
+            arg = f_args[i]
+            T = expr_type(m, arg)
+            track_types!(m, arg, pointer_map)
+            haskey(pointer_map, arg) && push_app!(ptrs, pointer_map[arg])
+            trackers[TypedSlot(i + 1, T)] = get(pointer_map, arg, :failed_tracking)
         end
+        m2.cache[:tracked_types] = trackers
+        track_types!(m2, getast!(m2), trackers)
+
         if isa(f, DataType) && f <: Tuple
             # Tuples need special treatment since the constructor is intrinsic without using new
             pointer_map[expr] = map(enumerate(ptrs)) do i_arg
@@ -150,7 +146,6 @@ function track_types!(m::LazyMethod)
             unique_ptrs = map(enumerate(fields)) do i_field
                 (i_field[2]..., gensym(Symbol(string(name, i_field[1]))))
             end
-            @show unique_ptrs
             pointer_map[slot] = unique_ptrs
         end
     end
@@ -158,36 +153,3 @@ function track_types!(m::LazyMethod)
     m.cache[:tracked_types] = pointer_map
     return
 end
-
-
-#
-# using Transpiler: CLMethod
-# is_tracked_type(m::CLMethod, ::Type{<: Ptr}) = true
-#
-# struct DevBuff
-#     ptr::Ptr{Int}
-# end
-# struct DevView
-#     dev::DevBuff
-# end
-#
-# function invert(ptr1, ptr2)
-#     return (ptr2, ptr1)
-# end
-#
-# function test(x, y)
-#     ptr1 = x.dev.ptr
-#     ptr2 = y.dev.ptr
-#     inverted = invert(ptr1, ptr2)
-#     dev = y.dev
-#     dev2 = dev
-#     dev3 = DevBuff(dev2.ptr)
-#     lolz = identity(dev2)
-#     return inverted[1]
-# end
-#
-# m = CLMethod((test, Tuple{DevView, DevView}))
-# track_types!(m)
-#
-# m.cache[:tracked_types][TypedSlot(9, DevBuff)]
-# println(Sugar.getsource!(m))

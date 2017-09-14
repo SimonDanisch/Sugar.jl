@@ -254,10 +254,6 @@ function getast!(x::LazyMethod)
                         tmp = :($name::$T)
                         tmp.typ = T
                         unshift!(expr.args, tmp)
-                    else # argument
-                        if needs_decompose(x, T)
-                            cache[slot] = gensym(name)
-                        end
                     end
                 end
                 expr.typ = returntype(x)
