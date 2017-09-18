@@ -127,16 +127,18 @@ ssatypes(m::LazyMethod) = getcodeinfo!(m).ssavaluetypes
 
 function getslots!(m::LazyMethod)
     if !isdefined(m, :slots)
+        slotnames = Dict{Symbol, Int}()
         ci = getcodeinfo!(m)
         slots = Tuple{DataType, Symbol}[]
         for (i, (T, name)) in enumerate(zip(ci.slottypes, ci.slotnames))
-            # tmp + unused must be made unique
-            if name == Symbol("#temp#")
-                name = Symbol("xtempx_", i)
-            elseif name == Symbol("#unused#")
-                name = Symbol("xunused_", i)
+            unique_name = if haskey(slotnames, name)
+                id = slotnames[name] += 1
+                Symbol("$(name)$(id)")
+            else
+                slotnames[name] = 0
+                name
             end
-            push!(slots, (T, name))
+            push!(slots, (T, unique_name))
         end
         m.slots = slots
     end
@@ -149,7 +151,9 @@ slotnames(m::LazyMethod) = map(last, getslots!(m))
 slottype(m::LazyMethod, s::TypedSlot) = s.typ
 slottype(m::LazyMethod, s::Slot) = first(getslots!(m)[s.id])
 slottype(m::LazyMethod, s::SSAValue) = ssatypes(m)[s.id + 1]
-slotname(tp::LazyMethod, s::SSAValue) = ssavalue_name(s)
+function slotname(tp::LazyMethod, ssa::SSAValue)
+    Symbol(string("_ssavalue_", ssa.id))
+end
 
 function slotname(m::LazyMethod, s::Slot)
     slots = getslots!(m)

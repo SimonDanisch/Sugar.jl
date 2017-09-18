@@ -17,4 +17,3 @@ immutable ExprNotSupported
 end
 
 unsupported_expr(message, line) = throw(ExprNotSupported(message, line))
-ssavalue_name(ssa::SSAValue) = string("_ssavalue_", ssa.id)
