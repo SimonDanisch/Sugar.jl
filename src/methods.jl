@@ -518,7 +518,8 @@ function rewrite_ast(m, expr)
                     if f == Core._apply
                         return true, rewrite_apply(m, types, expr)
                     end
-                    if f == Base.throw
+                    # TODO do this via deadcode elimination, dont eliminate if not dead
+                    if f in (Base.throw, Base.throw_boundserror)
                         return true, ()
                     end
                     if f == typeassert
