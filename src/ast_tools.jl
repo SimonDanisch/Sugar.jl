@@ -89,11 +89,11 @@ function _normalize_ast(expr::Expr)
         lam = expr.args[1] # Ignore lambda for now
         res = similar_expr(expr, map(normalize_ast, view(expr.args, 2:length(expr.args))))
         return true, res
-    elseif expr.head == :new
-        T = resolve_typ(expr.args[1])
-        expr = Expr(:call, T, map(normalize_ast, expr.args[2:end])...)
-        expr.typ = T
-        return true, expr
+    # elseif expr.head == :new
+    #     T = resolve_typ(expr.args[1])
+    #     expr = Expr(:call, T, map(normalize_ast, expr.args[2:end])...)
+    #     expr.typ = T
+    #     return true, expr
     # elseif expr.head == :static_parameter# TODO do something reasonable with static and meta
     #     # TODO, can other static parameters beside literal values escape with code_typed, optimization = false?
     #     return true, expr.args[1]
@@ -101,10 +101,9 @@ function _normalize_ast(expr::Expr)
         return true, nothing
     elseif expr.head == :call
         f = expr.args[1]
-        if Sugar.isa_applytype(f)
-            args = expr.args[2:end]
-            T = applytype_type(f, args)
-            return true, similar_expr(expr, vcat(T, map(normalize_ast, args)))
+        if f == GlobalRef(Core, :apply_type)
+            T = unspecialized_type(expr.typ)
+            return true, T
         end
         return true, similar_expr(expr, map(normalize_ast, expr.args))
     end

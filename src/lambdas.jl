@@ -67,6 +67,19 @@ function get_source_file(path::AbstractString, ln)
 end
 
 
+function get_lambda(pass, ftype::DataType, types)
+    world = typemax(UInt)
+    if !isclosure(ftype)
+        ftype = Type{ftype}
+    end
+    tt = Tuple{ftype, to_tuple(types)...}
+    (ti, env, meth) = Base._methods_by_ftype(tt, 1, world)[1]
+    meth = Base.func_for_method_checked(meth, tt)
+    params = Core.Inference.InferenceParams(world)
+    (_, code, ty) = Core.Inference.typeinf_code(meth, ti, env, false, false, params)
+    code
+end
+
 function get_ast(pass, f, types)
     lambda = get_lambda(pass, f, types)
     get_ast(lambda)
@@ -123,6 +136,15 @@ function get_lambda(pass, f, types, optimize = false)
 end
 function get_method(f, types::Type)
     get_method(f, (types.parameters...))
+end
+function get_method(ftype::DataType, types::Tuple)
+    world = typemax(UInt)
+    if !isclosure(ftype)
+        ftype = Type{ftype}
+    end
+    tt = Tuple{ftype, to_tuple(types)...}
+    (ti, env, meth) = Base._methods_by_ftype(tt, 1, world)[1]
+    Base.func_for_method_checked(meth, tt)
 end
 function get_method(f, types::Tuple)
     if !all(isleaftype, types)

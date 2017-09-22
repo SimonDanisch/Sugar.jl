@@ -86,9 +86,11 @@ end
 decl = @lazymethod controlflow_1(1, 2)
 ast = Sugar.getast!(decl)
 
+
 @testset "method dependencies" begin
     deps = Sugar.dependencies!(decl)
     deps_test = [
+        typeof(controlflow_1),
         Bool,
         Int,
         (==, Tuple{Int64,Int64}),
@@ -108,6 +110,7 @@ ast = Sugar.getast!(decl)
     @test length(funcdeps) == length(funcs)
     @test all(x-> x.signature in funcs, funcdeps)
     types = [
+        typeof(controlflow_1),
         Int64,
         Bool
     ]
@@ -139,7 +142,7 @@ function typed_expr(head, typ, args...)
 end
 ast_target = []
 push!(ast_target, typed_expr(:(::), Float32, :acc, Float32))
-push!(ast_target, typed_expr(:(::), Int, :xtempx_4, Int))
+push!(ast_target, typed_expr(:(::), Int, Symbol("#temp#"), Int))
 push!(ast_target, typed_expr(:(::), Int, :i, Int))
 sloti, slotx, slotacc = TypedSlot(3, Int), TypedSlot(2, Float32), TypedSlot(5, Float32)
 
@@ -219,10 +222,11 @@ ast2 = Sugar.sugared(test2, (Int, Int), code_lowered)
 
 test3(b) = one(b)
 lm = @lazymethod test3(Int)
-deps = [LazyMethod(Type{Int}), @lazymethod(one(Int))]
+deps = [LazyMethod(typeof(test3)), LazyMethod(Type{Int}), LazyMethod(Int), @lazymethod(one(Int))]
 @test all(x-> x in deps, dependencies!(lm))
+
 
 test4(b::T) where T = one(T)
 lm = @lazymethod test4(1)
-deps = [LazyMethod(Int), LazyMethod(Type{Int}), @lazymethod(one(Int))]
+deps = [LazyMethod(typeof(test4)), LazyMethod(Int), LazyMethod(Type{Int}), @lazymethod(one(Int))]
 @test all(x-> x in deps, dependencies!(lm))

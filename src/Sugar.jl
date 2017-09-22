@@ -27,6 +27,7 @@ include("show.jl")
 
 # helper to work with methods
 include("methods.jl")
+include("pointer_tracking.jl")
 
 export LazyMethod, getast!, getfunction, isfunction, istype, dependencies!, @lazymethod
 
