@@ -42,6 +42,21 @@ apply_vararg2(x...) = +(x...)
             @test false
         end
     end
+    @testset "complex exp" begin
+        # exp was complex enough to break Matcha, so lets test it
+        method = Sugar.LazyMethod(exp, Tuple{Complex64})
+        func_expr = Sugar.get_func_expr(method, gensym(:exp_sugar))
+        try
+            round_tripped = eval(func_expr)
+            for i = 1:10
+                x = rand(Complex64)
+                @test round_tripped(x) == exp(x)
+            end
+        catch e
+            warn(e)
+            @test false
+        end
+    end
     @testset "apply vararg" begin
         method = @lazymethod apply_vararg2(1, 2, 3)
         func_expr = Sugar.get_func_expr(method, gensym(:varargtest))
