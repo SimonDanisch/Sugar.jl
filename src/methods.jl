@@ -609,6 +609,7 @@ function type_dependencies!(lm::LazyMethod)
     typ = lm.signature
     if isleaftype(typ) || isa(typ, Type)
         for name in fieldnames(typ)
+            typ == Module && continue
             ft = fieldtype(typ, name)
             # Tuples can be types that are not possible to instantiate, e.g. Tuple{1, 1}
             if !(typ <: Tuple && !isa(ft, DataType))
@@ -653,7 +654,10 @@ end
 remove_inlinenodes(node, insertion) = node
 
 function remove_inlinenodes(node::InlineNode, insertion)
-    splice!(insertion[1], insertion[2], node.deps)
+    list = Any[nothing] # cant be empty for splice! to work
+    results = remove_inlinenodes.(node.deps, ((list, 1:1),))
+    filter!(x-> x != nothing, list)
+    splice!(insertion[1], insertion[2], vcat(list, results))
     remove_inlinenodes(node.expression, insertion)
 end
 
