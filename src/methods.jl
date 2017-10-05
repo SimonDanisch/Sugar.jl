@@ -125,6 +125,15 @@ end
 
 ssatypes(m::LazyMethod) = getcodeinfo!(m).ssavaluetypes
 
+function concrete_type(::Type{T}) where T
+    T == Union{} && return false
+    T <: Type && return true
+    T <: Function && return true
+    isleaftype(T) && return true
+    false
+end
+
+
 function getslots!(m::LazyMethod)
     if !isdefined(m, :slots)
         slotnames = Dict{Symbol, Int}()
@@ -138,6 +147,7 @@ function getslots!(m::LazyMethod)
                 slotnames[name] = 0
                 name
             end
+            #concrete_type(T) || error("Found non concrete type for variable: $unique_name, with type $T")
             push!(slots, (T, unique_name))
         end
         m.slots = slots
