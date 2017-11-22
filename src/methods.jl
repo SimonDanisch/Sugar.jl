@@ -261,6 +261,9 @@ function getast!(x::LazyMethod)
                     end
                 end
                 expr.typ = returntype(x)
+                args = Any[Expr(:inbounds, true), expr.args..., Expr(:inbounds, :pop)]
+                args = Core.Inference.meta_elim_pass!(args, true, false)
+                expr.args = args # remove our inbounds
                 expr
             end
         else
