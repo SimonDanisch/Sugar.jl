@@ -425,7 +425,8 @@ isclosure(FT) = false
 function isclosure(FT::Type)
     FT <: Function && nfields(FT) > 0
 end
-
+resolve_module(x::Module) = x
+resolve_module(x::GlobalRef) = getfield(x.mod, x.name)
 """
 Rewrite the ast to resolve everything statically
 and infers the dependencies of an expression
@@ -509,7 +510,6 @@ function rewrite_ast(m, expr)
                     else
                         resolve_func(m, func)
                     end
-
                     if f == typeof
                         return true, unspecialized_type(expr_type(m, expr))
                     end
@@ -520,6 +520,9 @@ function rewrite_ast(m, expr)
                     end
                     if f == Core._apply
                         return true, rewrite_apply(m, types, expr)
+                    end
+                    if f == Core.getfield && types == (Module, Symbol) && isa(expr.args[3], Symbol)
+                        return true, getfield(resolve_module(expr.args[2]), expr.args[3])
                     end
                     # TODO do this via deadcode elimination, dont eliminate if not dead
                     if f in (Base.throw, Base.throw_boundserror)
