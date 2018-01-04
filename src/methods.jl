@@ -533,7 +533,7 @@ function rewrite_ast(m, expr)
                         args = expr.args[2:end]
                         # typeassert(::T, Type{T}) where T
                         aT, bT = Sugar.expr_type.(m, args)
-                        if aT != unspecialized_type(bT)
+                        if !(aT <: unspecialized_type(bT))
                             error("Typeassert failed: found type $aT, needs to be $(unspecialized_type(bT))")
                         end
                         res = rewrite_ast(m, expr.args[2])
