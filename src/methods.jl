@@ -61,10 +61,15 @@ end
 
 isintrinsic(f::IntrinsicFuncs) = true
 isintrinsic(f) = false
-
+is_native_type(x::LazyMethod, T) = false
 function isintrinsic(x::LazyMethod)
-    isfunction(x) && isintrinsic(getfunction(x))
+    if isfunction(x)
+        isintrinsic(x, x.signature...)
+    else
+        is_native_type(x, x.signature)
+    end
 end
+
 function Base.push!(decl::LazyMethod, x::LazyMethod)
     push!(decl.dependencies, x)
 end
@@ -372,12 +377,14 @@ make_typed_slot(m, slot::TypedSlot) = slot
 function make_typed_slot(m, slot::SSAValue)
     newslot!(m, slottype(m, slot), slotname(m, slot))
 end
+
 make_typed_slot(m, slot) = error("Lhs not a slot. Found: $slot")
-jlintrinsic(x::LazyMethod) = isintrinsic(getfunction(x))
+
+
 # applicable is not overloadable
 function exists(x::LazyMethod)
     istype(x) && return true # you can't construct a non existing type
-    jlintrinsic(x) && return true # must exist when intrinsic
+    isintrinsic(x) && return true # must exist when intrinsic
     try
         getmethod!(x)
         return true
