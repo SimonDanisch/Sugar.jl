@@ -373,11 +373,11 @@ function make_typed_slot(m, slot::SSAValue)
     newslot!(m, slottype(m, slot), slotname(m, slot))
 end
 make_typed_slot(m, slot) = error("Lhs not a slot. Found: $slot")
-
+jlintrinsic(x::LazyMethod) = isintrinsic(getfunction(x))
 # applicable is not overloadable
 function exists(x::LazyMethod)
     istype(x) && return true # you can't construct a non existing type
-    isintrinsic(x) && return true # must exist when intrinsic
+    jlintrinsic(x) && return true # must exist when intrinsic
     try
         getmethod!(x)
         return true
