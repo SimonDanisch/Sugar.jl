@@ -206,8 +206,8 @@ function get_source(method)
 end
 
 function slot_vector(lam_typed)
-    if isa(lam_typed.slotnames, Void) || isa(lam_typed.slottypes, Void)
-        return [(SlotNumber(-1), ("", Void))]
+    if isa(lam_typed.slotnames, Nothing) || isa(lam_typed.slottypes, Nothing)
+        return [(SlotNumber(-1), ("", Nothing))]
     end
     slotnames = copy(lam_typed.slotnames)
     slottypes = copy(lam_typed.slottypes)

@@ -39,7 +39,7 @@ LazyMethod(f, types) = LazyMethod{:JL}((f, Base.to_tuple_type(types)))
 Like @code_typed, but will create a lazymethod!
 """
 macro lazymethod(ex0)
-    :($(Base.gen_call_with_extracted_types(:LazyMethod, ex0)))
+    :($(Base.gen_call_with_extracted_types(Base, :LazyMethod, ex0)))
 end
 
 
@@ -62,6 +62,7 @@ end
 isintrinsic(f::IntrinsicFuncs) = true
 isintrinsic(f) = false
 is_native_type(x::LazyMethod, T) = false
+isintrinsic(x::LazyMethod, f, typ) = isintrinsic(f)
 function isintrinsic(x::LazyMethod)
     if isfunction(x)
         isintrinsic(x, x.signature...)
@@ -267,7 +268,7 @@ function getast!(x::LazyMethod)
                 end
                 expr.typ = returntype(x)
                 args = Any[Expr(:inbounds, true), expr.args..., Expr(:inbounds, :pop)]
-                args = Core.Inference.meta_elim_pass!(args, true, false)
+                Core.Inference.meta_elim_pass!(args, true)
                 expr.args = args # remove our inbounds
                 expr
             end
@@ -645,7 +646,7 @@ function dependencies!(lm::LazyMethod, recursive = false)
             push!(lm, elem)
         end
         RT = returntype(lm)
-        if isa(RT, DataType) && RT != Void && RT != Union{}
+        if isa(RT, DataType) && RT != Nothing && RT != Union{}
             push!(lm, RT)
         end
         getast!(lm) # walks ast && insertes dependencies
@@ -762,10 +763,10 @@ expr_type{T}(lm, x::Type{T}) = Type{T}
 expr_type{T}(lm, x::T) = T
 expr_type(lm, x::InlineNode) = expr_type(lm, x.expression)
 
-expr_type(lm::Void, x::TypedSlot) = x.typ
+expr_type(lm::Nothing, x::TypedSlot) = x.typ
 expr_type(lm::LazyMethod, x::TypedSlot) = x.typ
 
-function expr_type(lm::Void, slot::Union{Slot, SSAValue})
+function expr_type(lm::Nothing, slot::Union{Slot, SSAValue})
     error("Can't get expression type of an untyped SSAValue/Slot without a propper method context")
 end
 expr_type(lm::LazyMethod, slot::Union{Slot, SSAValue}) = slottype(lm, slot)
