@@ -3,10 +3,12 @@
 @compat abstract type ASTIO <: IO end
 
 Base.print(io::ASTIO, args...) = print(io.io, args...)
+Base.print(io::ASTIO, args::TypedSlot) = print(io.io, args)
 Base.print(io::ASTIO, arg::String) = print(io.io, arg)
 Base.print(io::ASTIO, arg::Char) = print(io.io, arg)
 Base.print(io::ASTIO, arg::Symbol) = print(io.io, arg)
 Base.print(io::ASTIO, arg::Float32) = print(io.io, arg)
+
 Base.write(io::ASTIO, args...) = write(io.io, args...)
 Base.write(io::ASTIO, arg::UInt8) = write(io.io, arg)
 Base.write(io::ASTIO, arg::String) = write(io.io, arg)
