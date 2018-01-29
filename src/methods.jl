@@ -378,7 +378,7 @@ function make_typed_slot(m, slot::SSAValue)
     newslot!(m, slottype(m, slot), slotname(m, slot))
 end
 
-make_typed_slot(m, slot) = error("Lhs not a slot. Found: $slot")
+make_typed_slot(m, slot) = error("Lhs not a slot. Found: $(typeof(slot))")
 
 
 # applicable is not overloadable
