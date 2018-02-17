@@ -62,6 +62,7 @@ end
 isintrinsic(f::IntrinsicFuncs) = true
 isintrinsic(f) = false
 is_native_type(x::LazyMethod, T) = false
+isintrinsic(x::LazyMethod, f, signature) = isintrinsic(f)
 function isintrinsic(x::LazyMethod)
     if isfunction(x)
         isintrinsic(x, x.signature...)
