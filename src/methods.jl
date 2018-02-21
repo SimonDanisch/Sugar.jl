@@ -530,8 +530,8 @@ function rewrite_ast(m, expr)
                     if is_typedomain(return_type) # in type domain
                         return true, to_valuedomain(return_type)
                     end
-                    if f == issubtype && length(types) == 2 && all(is_typedomain, types) # in type domain
-                        return true, issubtype(to_valuedomain.(types)...)
+                    if f in (issubtype, ==, ===) && length(types) == 2 && all(is_typedomain, types) # in type domain
+                        return true, f(to_valuedomain.(types)...)
                     end
                     if f == isa
                         T1 = expr_type(m, expr.args[2])
