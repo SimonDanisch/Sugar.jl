@@ -385,7 +385,8 @@ make_typed_slot(m, slot) = error("Lhs not a slot. Found: $(typeof(slot))")
 # applicable is not overloadable
 function exists(x::LazyMethod)
     istype(x) && return true # you can't construct a non existing type
-    isintrinsic(x) && return true # must exist when intrinsic
+    isintrinsic(x.signature[1]) && return true # must exist when julia intrinsic
+    isintrinsic(x) && return true # must exist when backend intrinsic
     try
         getmethod!(x)
         return true
@@ -435,6 +436,11 @@ function isclosure(FT::Type)
 end
 resolve_module(x::Module) = x
 resolve_module(x::GlobalRef) = getfield(x.mod, x.name)
+
+is_typedomain(::Type{Type{T}}) where T = true
+is_typedomain(x) = false
+to_valuedomain(::Type{Type{T}}) where T = T
+
 """
 Rewrite the ast to resolve everything statically
 and infers the dependencies of an expression
@@ -519,7 +525,13 @@ function rewrite_ast(m, expr)
                         resolve_func(m, func)
                     end
                     if f == typeof
-                        return true, unspecialized_type(expr_type(m, expr))
+                        return true, unspecialized_type(return_type)
+                    end
+                    if is_typedomain(return_type) # in type domain
+                        return true, to_valuedomain(return_type)
+                    end
+                    if f == issubtype && length(types) == 2 && all(is_typedomain, types) # in type domain
+                        return true, issubtype(to_valuedomain.(types)...)
                     end
                     if f == isa
                         T1 = expr_type(m, expr.args[2])
@@ -533,7 +545,7 @@ function rewrite_ast(m, expr)
                         return true, getfield(resolve_module(expr.args[2]), expr.args[3])
                     end
                     # TODO do this via deadcode elimination, dont eliminate if not dead
-                    if f in (Base.throw, Base.throw_boundserror)
+                    if f in (Base.throw, Base.throw_boundserror, Base.error)
                         return true, ()
                     end
                     if f == typeassert
