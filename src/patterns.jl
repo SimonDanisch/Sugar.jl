@@ -146,9 +146,9 @@ function (pat::MTMatchFun)(expr)
     end
 end
 
-struct FrameBuffer{N, ElTypes}
-    buffers::NTuple{N, <: Texture}
-end
+# struct FrameBuffer{N, ElTypes}
+#     buffers::NTuple{N, <: Texture}
+# end
 
 
 function mt_match(patterns::Vector)

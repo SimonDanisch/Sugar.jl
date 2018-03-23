@@ -39,7 +39,7 @@ LazyMethod(f, types) = LazyMethod{:JL}((f, Base.to_tuple_type(types)))
 Like @code_typed, but will create a lazymethod!
 """
 macro lazymethod(ex0)
-    :($(Base.gen_call_with_extracted_types(Base, :LazyMethod, ex0)))
+    :($(InteractiveUtils.gen_call_with_extracted_types(Base, :LazyMethod, ex0)))
 end
 
 
