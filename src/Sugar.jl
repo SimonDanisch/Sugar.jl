@@ -3,6 +3,8 @@ module Sugar
 
 using Matcha, MacroTools, DataStructures, Compat
 
+import Base: LabelNode, GotoNode, SlotNumber, SSAValue, NewvarNode, TypedSlot, Slot
+
 const AllFuncs = Union{Function, Core.Builtin, Core.IntrinsicFunction}
 const IntrinsicFuncs = Union{Core.Builtin, Core.IntrinsicFunction}
 
@@ -30,5 +32,6 @@ include("methods.jl")
 # include("pointer_tracking.jl")
 
 export LazyMethod, getast!, getfunction, isfunction, istype, dependencies!, @lazymethod
+export typed_ir, Label, Goto, GotoIfNot, @ast_pattern, @extract
 
 end # module

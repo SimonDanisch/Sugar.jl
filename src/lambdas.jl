@@ -8,31 +8,10 @@ function Base.showerror(io::IO, e::NoMethodError)
     print(io, "$(e.func)($args) couldn't be found")
 end
 
-# Give string based stages a type
-immutable CodeLLVM
-    source::String
-end
-function CodeLLVM(f, types)
-    src = sprint() do io
-        code_llvm(io, f, types)
-    end
-    CodeLLVM(src)
-end
-immutable CodeNative
-    source::String
-end
-function CodeNative(f, types)
-    src = sprint() do io
-        code_native(io, f, types)
-    end
-    CodeNative(src)
-end
-
-
 const SCodeInfo = if isdefined(:LambdaInfo)
     LambdaInfo
-elseif isdefined(:CodeInfo)
-    CodeInfo
+elseif isdefined(Base, :CodeInfo)
+    Base.CodeInfo
 else
     error("Unsupported Julia Version")
 end
@@ -205,29 +184,6 @@ function get_source(method)
     long.args[2], str
 end
 
-function slot_vector(lam_typed)
-    if isa(lam_typed.slotnames, Nothing) || isa(lam_typed.slottypes, Nothing)
-        return [(SlotNumber(-1), ("", Nothing))]
-    end
-    slotnames = copy(lam_typed.slotnames)
-    slottypes = copy(lam_typed.slottypes)
-
-    slots = [(SlotNumber(i), (string(name), slottypes[i])) for (i, name) in enumerate(slotnames)]
-    ssaslot = [(SSAValue(i-1), ("ssa_$(i-1)", t)) for (i,t) in enumerate(lam_typed.ssavaluetypes)]
-    vcat(slots, ssaslot)
-end
-
-function slot_dictionary(lam_typed)
-    slots = slot_vector(lam_typed)
-    s_dict = Dict()
-    for (k, (name, T)) in slots
-        if !isa(k, SSAValue)
-            s_dict[k] = T
-        end
-        s_dict[Symbol(name)] = T
-    end
-    s_dict
-end
 
 """
 Returns an AST most similar to what you would get from a macro
@@ -281,26 +237,9 @@ function clean_typed(f, types)
     insert_types(ast, sdict)
 end
 
-const _source_map = Dict{Function, Expr}()
 
-macro preserve_source(expr)
-    # TODO this doesn't seem to work for curly
-    result = @match expr begin
-        (
-            f_(args__) = body_ |
-            function f_(args__) body_ end |
-            f_{sargs__}(args__) = body_ |
-            function f_{sargs__}(args__) body_ end
-        ) => (f, args, body)
-    end
-    if result == nothing
-        error("Expr $expr doesn't declare a function")
-    end
-    func_expr = MacroTools.longdef(expr) # always have the function be in long form (function x(args...) end)
-    quote
-        # evaluate function
-        $expr
-        # insert into source map
-        _source_map[$f] = $(Expr(:quote, func_expr))
-    end
+
+function typed_ir(f, signature::Type{<: Tuple}; optimize = true, remove_meta = true)
+    ast = code_typed(f, signature, optimize = optimize)[1][1].code
+    remove_meta && Sugar.remove_meta(ast)
 end
