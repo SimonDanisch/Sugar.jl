@@ -113,8 +113,8 @@ end
 """
 Sugared, normalized AST, which basically decompiles the expr list returned by e.g code_typed
 """
-function sugared(f, types, stage = code_lowered)
-    ast = typed_ir(stage, f, types)
+function sugared(f, types)
+    ast = typed_ir(f, types)
     body = Expr(:block)
     append!(body.args, remove_goto(ast))
     body
