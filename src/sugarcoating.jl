@@ -1,13 +1,66 @@
 is_linenumber(x::ANY) = isexpr(x, :line) || isa(x, LineNumberNode)
 
+const for_pattern = @ast_pattern begin
+
+     Greed(ssa19_ = (Base.sle_int)(from_, to1_), 0:1)
+     Greed(ssa212_ = (Base.sub_int)(from_, 1), 0:1) # this is optional and doesn't happen for `for i in 1:n`
+     Greed(to_ = (Base.select_value)(ssa19_, to1_, ssa212_), 0:1)
+
+     idx_ = from_
+     Label(startlabel_)
+     ssa40_ = (Base.add_int)(to_, 1)
+     ssa41_ = (idx_ === ssa40_)
+     ssa3_ = (Base.not_int)(ssa41_)
+
+     GotoIfNot(ssa3_, endlabel_)
+
+     nextidx_ = (Base.add_int)(idx_, 1)
+     idxssa_ = idx_
+     idx_ = nextidx_
+
+     body__
+
+     Greed(Label(continuelabel_), 0:1) # continue break label, which is optional
+     Goto(startlabel_)
+     Label(endlabel_)
+end
+
+const while_pattern = @ast_pattern begin
+    Label(start_)
+    whilesetup__
+    GotoIfNot(condition_, endlabel_)
+
+    body__
+
+    Greed(Label(continuelabel_), 0:1)
+    Goto(start_)
+    Label(endlabel_)
+end
+
+const ifelse_pattern = @ast_pattern begin
+    GotoIfNot(condition_, elselabel_)
+    ifbody__
+    Goto(endlabel_)
+    Label(elselabel_)
+    elsebody__
+    Label(endlabel_)
+end
+
+const if_pattern = @ast_pattern begin
+    GotoIfNot(condition_, endlabel_)
+    body__
+    Greed(Label(endlabel_), 0:1)
+end
+
+
 """
 Replaces `goto` statements in a loop body with continue and break.
 """
 function replace_continue_break(astlist, continue_label, break_label)
     map(astlist) do elem
-        if isa(elem, GotoNode) && elem.label == continue_label.label
+        if isa(elem, GotoNode) && elem.label == continue_label
             Expr(:continue)
-        elseif isa(elem, GotoNode) && elem.label == break_label.label
+        elseif isa(elem, GotoNode) && elem.label == break_label
             Expr(:break)
         else
             elem
@@ -15,83 +68,54 @@ function replace_continue_break(astlist, continue_label, break_label)
     end
 end
 
+# The matched body comes as a view, with which remove_goto doesn't work right now (should be possible though)
+_remove_goto(x) = remove_goto(collect(x))
+
+function replace_for(ast)
+    matchreplace(ast, for_pattern) do match
+        @extract match (idx, from, to, body, idxssa, endlabel)
+        haskey(match, :to1) && (to = match[:to1])
+        if haskey(match, :continuelabel)
+            body = replace_continue_break(collect(body), match[:continuelabel], endlabel)
+        end
+        Expr(:for, :($idx in $from : $to), Expr(:block, :($idxssa = $idx), _remove_goto(body)...))
+    end
+end
+function replace_while(ast)
+    matchreplace(ast, while_pattern) do match
+        @extract match (condition, whilesetup, body, endlabel)
+        if haskey(match, :continuelabel)
+            body = replace_continue_break(collect(body), match[:continuelabel], endlabel)
+        end
+        Expr(:while, condition, Expr(:block, whilesetup..., _remove_goto(body)...))
+    end
+end
+function replace_if(ast)
+    matchreplace(ast, if_pattern) do match
+        @extract match (condition, body)
+        Expr(:if, condition, Expr(:block, _remove_goto(body)...))
+    end
+end
+function replace_ifelse(ast)
+    matchreplace(ast, ifelse_pattern) do match
+        @extract match (condition, ifbody, elsebody)
+        Expr(:if, condition, Expr(:block, _remove_goto(ifbody)...), Expr(:block, _remove_goto(elsebody)...))
+    end
+end
+
 """
 Removes all goto/label constructs and puts them back into Julia Expr
 """
 function remove_goto(ast)
-    ast = matchreplace(ast, goto_neighbours) do goto, label
-        # a goto that is directly next to its label can be removed!
-        label[1]
-    end
-
-    ast = matchreplace(ast, for_pattern) do colon,
-            start, loop_label, unless, unused,
-            next, body, continue_label,
-            goto, break_label
-        colonargs = colon[1].args[2].args
-        from, to = colonargs[2], colonargs[3]
-
-        condition = unless[1].args[1]
-        body = Any[replace_continue_break(collect(body), continue_label[1], break_label[1])...]
-        push!(body, continue_label[1])
-        body = remove_goto(body)
-        # TODO, I guess this will never be removed anyways, so we could just always pop it
-        if last(body) == continue_label[1]
-            pop!(body)
-        end
-        # remove getfield of next unitrange
-        nextslot = next[1].args[1]
-        elem, i = first(body), Base.start(body)
-        index = start[1].args[1] # this is index tmp, but might be a good default
-        while !Base.done(body, i) && isgetfield(elem, nextslot)
-            next_tuple_idx = elem.args[2].args[3]
-            if next_tuple_idx == 1 # should be first element
-                index = elem.args[1] # this is our real index
-            end
-            shift!(body)
-            elem, _ = Base.next(body, i)
-        end
-        block = Expr(:block, body...)
-        Expr(:for, :($index = $from : $to), block)
-    end
-
-    ast = matchreplace(ast, while_pattern) do loop_label, unless, whilebody, continue_label, goto, break_label
-        condition = unless[1].args[1]
-        whilebody = Any[replace_continue_break(collect(whilebody), continue_label[1], break_label[1])...]
-        push!(whilebody, continue_label[1])
-        whilebody = remove_goto(whilebody)
-        if last(whilebody) == continue_label[1] # TODO, I guess this will never be removed anyways, so we could just always pop it
-            pop!(whilebody)
-        end
-        block = Expr(:block, whilebody...)
-        Expr(:while, condition, block)
-    end
-    ast = matchreplace(ast, ifelse_pattern) do unless, ifbody, _1, _2, elsebody, endlabel
-        condition = unless[1].args[1]
-        ifbody = Expr(:block, remove_goto(collect(ifbody))...)
-        # drop goto end, since we will goto end because of if else branching anyways
-        elsebody = filter(elsebody) do x
-            !(isgoto(x) && x.label == endlabel[1].label)
-        end
-        elsebody = Expr(:block, remove_goto(elsebody)...)
-        Expr(:if, condition, ifbody, elsebody)
-    end
-    ast = matchreplace(ast, if_pattern) do unless, body, label...
-        condition = unless[1].args[1]
-        ifbody = Expr(:block, remove_goto(collect(body))...)
-        Expr(:if, condition, ifbody)
-    end
-    ast
+    ast |> replace_for |> replace_while |> replace_ifelse |> replace_if
 end
 
 """
 Sugared, normalized AST, which basically decompiles the expr list returned by e.g code_typed
 """
 function sugared(f, types, stage = code_lowered)
-    ast = get_ast(stage, f, types)
-    ast = normalize_ast(ast)
-    ast = remove_goto(filter(x-> x != nothing && !is_linenumber(x), ast))
+    ast = typed_ir(stage, f, types)
     body = Expr(:block)
-    append!(body.args, ast)
+    append!(body.args, remove_goto(ast))
     body
 end

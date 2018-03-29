@@ -51,7 +51,9 @@ end
 
 function (pat::MTMatchFun)(expr, hist)
     try
-        MacroTools.match(pat.pattern, expr, hist.env)
+        x = copy(hist.env)
+        MacroTools.match(pat.pattern, expr, x)
+        merge!(hist.env, x)
         return true
     catch e
         isa(e, MacroTools.MatchError) ? false : rethrow()
@@ -73,16 +75,24 @@ end
 struct Slurp <: Matcha.MatchFunc
     sym::Symbol
 end
-function (x::Slurp)(expr, hist)
-    push!(get!(hist.env, x.sym, []), expr)
-    true
+
+function Matcha.view_constructor(x::Slurp, h::Matcha.History{X, T, Y}, a, b) where {X, Y, T <: SubArray}
+    match = view(h.buffer, a:b)
+    if !haskey(h.env, x.sym)
+        h.env[x.sym] = match
+    end
+    match
 end
+
+(x::Slurp)(expr) = true
 
 function macrotools_patterns(patterns::Vector)
     patterns = remove_meta(patterns)
     matcha_pattern = ntuple(length(patterns)) do i
         pat = patterns[i]
-        if MacroTools.isslurp(pat)
+        if pat isa Union{Greed, Matcha.MatchFunc}
+            pat
+        elseif MacroTools.isslurp(pat)
             sym = MacroTools.bname(pat)
             Matcha.Greed(Slurp(sym))
         else
@@ -95,15 +105,37 @@ end
 no_quote(x::QuoteNode) = x.value
 no_quote(x) = x
 
+eval_range(x) = error("Invalid range: $x")
+eval_range(x::Range) = x
+function eval_range(x::Expr)
+    Meta.isexpr(x, :call) && x.args[1] == :(:) && return x.args[2] : x.args[3]
+    error("Invalid range: $x")
+end
+
+function eval_special_nodes(arg::Expr)
+    special_nodes = (:Label, :Goto, :GotoIfNot)
+    if Meta.isexpr(arg, :call)
+        f = arg.args[1]
+        if f in special_nodes
+            return getfield(Sugar, f)(no_quote.(arg.args[2:end])...)
+        elseif f == :Greed
+            expr = arg.args[2]
+            range = arg.args[3]
+            if MacroTools.isslurp(expr)
+                error("Can't slurp and greed at the same time. Slurping greed: $arg")
+            end
+            return Greed(MTMatchFun(eval_special_nodes(expr)), eval_range(range))
+        end
+    end
+    arg
+end
 macro ast_pattern(block)
     if block.head != :block
         error("Please supply a block. Found: $(block.head)")
     end
-    special_nodes = (:Label, :Goto, :GotoIfNot)
     map!(block.args, block.args) do arg
-        if isa(arg, Expr) && arg.head == :call && arg.args[1] in special_nodes
-            f = arg.args[1]
-            getfield(Sugar, f)(no_quote.(arg.args[2:end])...)
+        if isa(arg, Expr) && arg.head == :call
+            eval_special_nodes(arg)
         else
             arg
         end

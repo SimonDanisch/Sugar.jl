@@ -1,30 +1,43 @@
+using Revise
 using Sugar, Matcha
 
-pat = @ast_pattern begin
-
-     ssa19_ = (Base.sle_int)(from_, to_)
-     ssa21_ = (Base.select_value)(ssa19_, to_, 0)
-     idx_ = from_
-
-     Label(startlabel_)
-     ssa40_ = (Base.add_int)(ssa21_, 1)
-     ssa41_ = (idx_ === ssa40_)
-     ssa3_ = (Base.not_int)(ssa41_)
-
-     GotoIfNot(ssa3_, endlabel_)
-
-     nextidx_ = (Base.add_int)(idx_, 1)
-     idxssa_ = idx_
-     idx_ = nextidx_
-
-     body__
-
-     Label(prebody_)
-     Goto(startlabel_)
-     Label(endlabel_)
-end;
 
 
+function ifelse_func(x)
+    if x == 1
+        println("heelo")
+    else
+        println("yo?")
+    end
+    return nothing
+end
+function if_func(x)
+    if x == 1
+        println("heelo")
+    end
+    return nothing
+end
+
+function whilefunc(x)
+    while x > 3
+        x -= 1
+        println("o")
+    end
+    return nothing
+end
+
+
+
+
+
+
+function test()
+    x = 0
+    for i = 1:3
+        x += i
+    end
+    x
+end
 function test(n)
     x = 0
     for i = 1:n
@@ -33,14 +46,81 @@ function test(n)
     x
 end
 
-
-
-ast = typed_ir(test, Tuple{Int})
-matchreplace(ast, pat) do match
-    @extract match (idx, from, to, body, idxssa)
-    Expr(:for, :($idx in $from : $to), Expr(:block, :($idxssa = $idx), body...))
+function test(a, n)
+    x = 0
+    for i = a:n
+        x += i
+        x = x + 2
+    end
+    x
+end
+function test2(a, n)
+    x = 0
+    for i = a:n
+        x += i
+        if i == 2
+            x = x + 2
+        end
+    end
+    x
+end
+function test3(a, n)
+    x = 0
+    for i = a:n
+        x += i
+        i == 2 && (x += 2)
+    end
+    x
+end
+function test4(a, n)
+    x = 0
+    for i = a:n
+        x += i
+        i == 2 && (x += 2)
+        x += 2
+    end
+    x
+end
+function test5(a, n)
+    x = 0
+    for i = a:n
+        x += i
+        if i == 1
+            x += 2
+        else
+            x += 3
+        end
+        x += 2
+    end
+    x
 end
 
+
+
+ast = typed_ir(test, Tuple{});
+x = matchreplace(ast, pat) do match
+    @extract match (idx, from, to, body, idxssa)
+    Expr(:for, :($idx in $from : $to), Expr(:block, :($idxssa = $idx), body...))
+end;
+Expr(:block, x...)
+
+ast = typed_ir(test, Tuple{Int, Int})
+x = matchreplace(ast, pat) do match
+    @extract match (idx, from, to, body, idxssa)
+    Expr(:for, :($idx in $from : $to), Expr(:block, :($idxssa = $idx), body...))
+end;
+Expr(:block, x...);
+for func in (test2, test3, test4, test5)
+    ast = typed_ir(test2, Tuple{Int, Int})
+    x = matchreplace(ast, pat) do match
+        @extract match (idx, from, to, body, idxssa)
+        if haskey(match.env, :to1)
+            to = match.env[:to1]
+        end
+        Expr(:for, :($idx in $from : $to), Expr(:block, :($idxssa = $idx), body...))
+    end
+    println(Expr(:block, x...))
+end
 
 expr_show(x::GlobalRef, io = STDOUT) = print(io, ":($(x.name))")
 expr_show(x::Any, io = STDOUT) = show(io, x)
@@ -69,33 +149,13 @@ function expr_show(x::Expr, io = STDOUT)
     end
     print(io, ")")
 end
-#
-#
-# pat = @ast_pattern begin
-#     ssa0_ = colon(start_, end_)
-#     state_ = start(ssa0_)
-#
-#     $(Label(:startlabel_))
-#
-#     ssa1_ = done(ssa0_, state_)
-#     ssa2_ = typeassert(ssa1_, Bool)
-#     ssa3_ = Base.not_int(ssa2_)
-#
-#     $(GotoIfNot(:ssa3_, :endlabel_))
-#
-#     ssa4_ = next(ssa0_, state_)
-#     idx_ = getfield(ssa4_, 1)
-#     state_ = getfield(ssa4_, 2)
-#
-#     body__
-#
-#     $(Label(:prebody_))
-#     $(Goto(:startlabel_))
-#     $(Label(:endlabel_))
-# end
 
-struct MTMatchFun
-end
-function (pat::MTMatchFun)(expr)
-    println(expr)
-end
+
+using Matcha
+using Sugar: Slurp, MTMatchFun
+
+x = [
+    :(a = 22),
+    :(a + 10)
+]
+matchat(x, (Greed(Sugar.Slurp(:body)), Greed(MTMatchFun(:(a_ + b_)), 0:1)))
