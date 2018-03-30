@@ -110,12 +110,20 @@ function remove_goto(ast)
     ast |> replace_for |> replace_while |> replace_ifelse |> replace_if
 end
 
+
+remove_invoke(arg::Vector) = (map!(remove_invoke, arg, arg); arg)
+function remove_invoke(arg)
+    Meta.isexpr(arg, :(=)) && return (arg.args .= remove_invoke.(arg.args); arg)
+    Meta.isexpr(arg, :invoke) && return Expr(:call, arg.args[2:end]...)
+    arg
+end
+
 """
 Sugared, normalized AST, which basically decompiles the expr list returned by e.g code_typed
 """
 function sugared(f, types)
     ast = typed_ir(f, types)
     body = Expr(:block)
-    append!(body.args, remove_goto(ast))
+    append!(body.args, ast |> remove_invoke |> remove_goto)
     body
 end

@@ -29,7 +29,12 @@ end
 
 
 
-
+function test_apply(x...)
+    +(x...)
+end
+function test_apply(x::T...) where T
+    (+(x...))::T
+end
 
 function test()
     x = 0
@@ -159,3 +164,18 @@ x = [
     :(a + 10)
 ]
 matchat(x, (Greed(Sugar.Slurp(:body)), Greed(MTMatchFun(:(a_ + b_)), 0:1)))
+
+# helper function to fake a return type to type inference for intrinsic function stabs
+@noinline function ret{T}(::Type{T})::T
+    unsafe_load(Ptr{T}(C_NULL))
+end
+@noinline function inline_opencl(x, ::Type{T}) where T
+    unsafe_load(Ptr{T}(C_NULL))
+end
+
+@inline get_num_groups(dim::Integer) = inline_opencl("get_num_groups(dim)", Cuint)
+
+
+function test(x, i)
+    get_num_groups(0)
+end
