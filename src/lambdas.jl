@@ -243,3 +243,46 @@ function typed_ir(f, signature::Type{<: Tuple}; optimize = true, remove_meta = t
     ast = code_typed(f, signature, optimize = optimize)[1][1].code
     remove_meta && Sugar.remove_meta(ast)
 end
+
+
+function slotname(ci, s::Slot)
+    slots = ci.slotnames
+    s.id <= length(slots) && return slots[s.id]
+    error("Slot value out of bounds")
+end
+function slotname(ci, ssa::SSAValue)
+    Symbol(string("_ssavalue_", ssa.id))
+end
+
+function replace_slots(ci, ast)
+    postwalk(Expr(:block, ast...)) do expr
+        if isa(expr, Slot) || isa(expr, SSAValue)
+            return slotname(ci, expr)
+        elseif isa(expr, NewvarNode)
+            return :(local $(slotname(ci, expr.slot)))
+        end
+        return expr
+    end.args
+end
+
+function get_func_expr(
+        f, signature::Type{<: Tuple},
+        name = Symbol(getfunction(m))
+    )
+    ci = code_typed(f, signature)[1][1]
+    get_func_expr(ci, ci.code, length(signature.parameters), name)
+end
+
+function get_func_expr(ci, ir::Vector, nargs::Int, name = Symbol(getfunction(m)))
+    ir = remove_meta(ir)
+    body = replace_slots(ci, ir)
+
+    args = map(ci.slotnames[2:nargs + 1], ci.slottypes[2:nargs + 1]) do name, argtype
+        :($(name)::$(argtype))
+    end
+    Expr(
+        :function,
+        Expr(:call, name, args...),
+        Expr(:block, body...)
+    )
+end
