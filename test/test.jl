@@ -173,7 +173,7 @@ end
     unsafe_load(Ptr{T}(C_NULL))
 end
 
-@inline get_num_groups(dim::Integer) = inline_opencl("get_num_groups(dim)", Cuint)
+@noinline get_num_groups(dim::Integer) = inline_opencl("get_num_groups(dim)", Cuint)
 
 
 function test(x, i)

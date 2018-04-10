@@ -809,45 +809,8 @@ function resolve_func(m, val::Union{Slot, SSAValue, Expr})
     end
 end
 
+function map_rec(f, x::Expr)
 
-
-function replace_slots(m::LazyMethod, ast)
-    first(Sugar.replace_expr(ast) do expr
-        if isa(expr, Slot) || isa(expr, SSAValue)
-            return true, slotname(m, expr)
-        elseif isa(expr, NewvarNode)
-            return true, :(local $(slotname(m, expr.slot)))
-        else
-            return false, expr
-        end
-    end)
-end
-
-function get_func_expr(m::LazyMethod, name = Symbol(getfunction(m)))
-    expr = sugared(m.signature..., code_lowered)
-    get_func_expr(m, expr, name)
-end
-
-function get_func_expr(m::LazyMethod, expr::Expr, name = Symbol(getfunction(m)))
-    body = replace_slots(m, expr)
-    functype = m.signature[1]
-    calltypes, slots = to_tuple(m.signature[2]), getslots!(m)
-    n = method_nargs(m)
-    args = map(2:n) do i
-        argtype, name = slots[i]
-        # Slot types might be less specific, e.g. when the variable is unused it might end up as Any.
-        # but generally the slot type is the correct one, especially in the context of varargs.
-        calltype = if !isleaftype(argtype) && length(calltypes) <= i
-            argtype = calltypes[i - 1]
-        end
-        expr = :($(name)::$(argtype))
-        expr.typ = argtype
-        expr
-    end
-    Expr(:function,
-        Expr(:call, name, args...),
-        body
-    )
 end
 
 

@@ -4,6 +4,7 @@ module Sugar
 using Matcha, MacroTools, DataStructures, Compat
 
 import Base: LabelNode, GotoNode, SlotNumber, SSAValue, NewvarNode, TypedSlot, Slot
+using MacroTools: postwalk
 
 const AllFuncs = Union{Function, Core.Builtin, Core.IntrinsicFunction}
 const IntrinsicFuncs = Union{Core.Builtin, Core.IntrinsicFunction}

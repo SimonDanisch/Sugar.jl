@@ -270,13 +270,14 @@ function get_func_expr(
         name = Symbol(getfunction(m))
     )
     ci = code_typed(f, signature)[1][1]
-    get_func_expr(ci, ci.code, length(signature.parameters), name)
+    m = get_method(f, signature)
+    get_func_expr(ci, ci.code, Int(m.nargs) - 1, name)
 end
 
 function get_func_expr(ci, ir::Vector, nargs::Int, name = Symbol(getfunction(m)))
     ir = remove_meta(ir)
-    body = replace_slots(ci, ir)
-
+    body = ir |> remove_invoke |> remove_goto
+    body = replace_slots(ci, body)
     args = map(ci.slotnames[2:nargs + 1], ci.slottypes[2:nargs + 1]) do name, argtype
         :($(name)::$(argtype))
     end
