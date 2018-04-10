@@ -251,6 +251,7 @@ function slotname(ci, s::Slot)
     error("Slot value out of bounds")
 end
 function slotname(ci, ssa::SSAValue)
+    # TODO, track used symbols so these are truely unique
     Symbol(string("_ssavalue_", ssa.id))
 end
 
