@@ -27,7 +27,11 @@ to_tuple{T<:Tuple}(x::Type{T}) = tuple(x.parameters...)
 _typeof{T}(x::Type{T}) = Type{T}
 _typeof{T}(x::T) = T
 
-jlhome() = ccall(:jl_get_julia_home, Any, ())
+if VERSION < v"0.7.0-DEV.4413"
+    jlhome() = ccall(:jl_get_julia_home, Any, ())
+else
+    jlhome() = Sys.BINDIR
+end
 
 function juliabasepath(file)
     srcdir = joinpath(jlhome(),"..","..","base")
@@ -40,7 +44,7 @@ function get_source_file(path::AbstractString, ln)
     # if not a file, it might be in julia base
     file = juliabasepath(path)
     if !isfile(file)
-        throw(LoadError(path, ln, ErrorException("file $path not found")))
+        throw(LoadError(path, Int(ln), ErrorException("file $path not found")))
     end
     file
 end
