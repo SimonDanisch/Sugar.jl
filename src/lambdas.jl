@@ -43,15 +43,13 @@ function _typeof(x::T) where T
 	T
 end
 
-jlhome() = ccall(:jl_get_julia_home, Any, ())
-
 function juliabasepath(file)
-    srcdir = joinpath(jlhome(),"..","..","base")
-    releasedir = joinpath(jlhome(),"..","share","julia","base")
+    srcdir = joinpath(Sys.BINDIR,"..","..","base")
+    releasedir = joinpath(Sys.BINDIR,"..","share","julia","base")
     normpath(joinpath(isdir(srcdir) ? srcdir : releasedir, file))
 end
 
-function get_source_file(path::AbstractString, ln)
+function get_source_file(path::AbstractString, ln::Int)
     isfile(path) && return path
     # if not a file, it might be in julia base
     file = juliabasepath(path)
@@ -167,7 +165,7 @@ end
 Looks up the source of `method` in the file path found in `method`.
 Returns the AST and source string, might throw an LoadError if file not found.
 """
-function get_source_at(file, linestart)
+function get_source_at(file, linestart::Int)
     file = get_source_file(file, linestart)
     code, str = open(file) do io
         line = ""
@@ -190,9 +188,9 @@ function get_source_at(file, linestart)
     code, str
 end
 
-function get_source(method)
+function get_source(method::Method)
     file = string(method.file)
-    linestart = method.line
+    linestart::Int = method.line
     code, str = get_source_at(file, linestart)
     # for consistency, we always return the `function f(args...) end` form
     long = MacroTools.longdef(code)
