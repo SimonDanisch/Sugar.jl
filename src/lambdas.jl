@@ -1,4 +1,4 @@
-immutable NoMethodError <: Exception
+struct NoMethodError <: Exception
     func
     types::Tuple
 end
@@ -9,7 +9,7 @@ function Base.showerror(io::IO, e::NoMethodError)
 end
 
 # Give string based stages a type
-immutable CodeLLVM
+struct CodeLLVM
     source::String
 end
 function CodeLLVM(f, types)
@@ -18,7 +18,7 @@ function CodeLLVM(f, types)
     end
     CodeLLVM(src)
 end
-immutable CodeNative
+struct CodeNative
     source::String
 end
 function CodeNative(f, types)
@@ -28,25 +28,20 @@ function CodeNative(f, types)
     CodeNative(src)
 end
 
-
-const SCodeInfo = if isdefined(:LambdaInfo)
-    LambdaInfo
-elseif isdefined(:CodeInfo)
-    CodeInfo
-else
-    error("Unsupported Julia Version")
-end
-
 # deal with all variances in base that should really be tuples but are something else
 to_tuple(x) = (x,)
 to_tuple(x::Core.SimpleVector) = tuple(x...)
 to_tuple(x::Tuple) = x
 to_tuple(x::AbstractVector) = tuple(x...)
-to_tuple{T<:Tuple}(x::Type{T}) = tuple(x.parameters...)
+to_tuple(x::Type{Tuple}) = tuple(x.parameters...)
 
 # typeof working with concrete and types at the same time
-_typeof{T}(x::Type{T}) = Type{T}
-_typeof{T}(x::T) = T
+function _typeof(x::Type{T}) where T
+	Type{T}
+end
+function _typeof(x::T) where T
+	T
+end
 
 jlhome() = ccall(:jl_get_julia_home, Any, ())
 
@@ -84,7 +79,7 @@ function get_ast(pass, f, types)
     lambda = get_lambda(pass, f, types)
     get_ast(lambda)
 end
-function get_ast(li::SCodeInfo)
+function get_ast(li::Core.CodeInfo)
     ast = li.code
     if isa(ast, Vector{UInt8})
         return Base.uncompressed_ast(li)

@@ -32,7 +32,7 @@ end
 
 needs_tracking(m, ::Type{T}) where T = contains_tracked_type(m, T)[1] || is_tracked_type(m, T)
 
-track_types!(m, any::ANY, pointer_map) = pointer_map
+track_types!(m, any, pointer_map) = pointer_map
 
 get_fields_type(T, fields::NTuple{1}) = fieldtype(T, first(fields))
 get_fields_type(T, fields::NTuple{N}) where N = get_fields_type(fieldtype(T, first(fields)), Base.tail(fields))
