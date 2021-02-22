@@ -2,7 +2,7 @@
 Method type, that you can lazily ask for all kind of information,
 e.g. AST, lambdainfo, arguments, dependencies etc.
 """
-type LazyMethod{T}
+struct LazyMethod{T}
     signature
     cache
     decls::OrderedSet
@@ -14,10 +14,10 @@ type LazyMethod{T}
     source::String
     funcheader::String
     slots::Vector{Tuple{DataType, Symbol}}
-    function (::Type{LazyMethod{T}}){T}(
+    function (::Type{LazyMethod{T}})(
             signature, parent = nothing,
             cache = Dict()
-        )
+        ) where T
         if parent == nothing
             new{T}(signature, cache, OrderedSet(), OrderedSet{LazyMethod}())
         else
@@ -28,8 +28,8 @@ type LazyMethod{T}
     end
 end
 
-LazyMethod{T}(lm::LazyMethod{T}, f, types) = LazyMethod{T}((f, Base.to_tuple_type(types)), lm, lm.cache)
-LazyMethod{T}(lm::LazyMethod{T}, t) = LazyMethod{T}(t, lm, lm.cache)
+LazyMethod(lm::LazyMethod, f, types) = LazyMethod((f, Base.to_tuple_type(types)), lm, lm.cache)
+LazyMethod(lm::LazyMethod, t) = LazyMethod(t, lm, lm.cache)
 
 
 LazyMethod(signature::DataType) = LazyMethod{:JL}(signature)
@@ -74,7 +74,7 @@ end
 function Base.push!(decl::LazyMethod, x::LazyMethod)
     push!(decl.dependencies, x)
 end
-function Base.push!{T, T2}(decl::LazyMethod{T}, signature::T2)
+function Base.push!(decl::LazyMethod{T}, signature::T2) where {T, T2}
     push!(decl.dependencies, LazyMethod(decl, signature))
 end
 
@@ -122,10 +122,10 @@ function newslot!(m, T, name = gensym())
     if idx > 0
         # means we already have a slot with this name + type, which we can use.
         # This needs to be treated with care, since it might also be a clash.
-        return TypedSlot(idx, T)
+        return Core.TypedSlot(idx, T)
     else
         push!(m.slots, (T, name))
-        return TypedSlot(length(m.slots), T)
+        return Core.TypedSlot(length(m.slots), T)
     end
 end
 
@@ -154,14 +154,14 @@ end
 slottypes(m::LazyMethod) = map(first, getslots!(m))
 slotnames(m::LazyMethod) = map(last, getslots!(m))
 
-slottype(m::LazyMethod, s::TypedSlot) = s.typ
-slottype(m::LazyMethod, s::Slot) = first(getslots!(m)[s.id])
-slottype(m::LazyMethod, s::SSAValue) = ssatypes(m)[s.id + 1]
-function slotname(tp::LazyMethod, ssa::SSAValue)
+slottype(m::LazyMethod, s::Core.TypedSlot) = s.typ
+slottype(m::LazyMethod, s::Core.Slot) = first(getslots!(m)[s.id])
+slottype(m::LazyMethod, s::Core.SSAValue) = ssatypes(m)[s.id + 1]
+function slotname(tp::LazyMethod, ssa::Core.SSAValue)
     Symbol(string("_ssavalue_", ssa.id))
 end
 
-function slotname(m::LazyMethod, s::Slot)
+function slotname(m::LazyMethod, s::Core.Slot)
     slots = getslots!(m)
     id = s.id
     if id <= length(slots)
@@ -257,7 +257,7 @@ function getast!(x::LazyMethod)
                 expr = sugared(x.signature..., code_typed)
                 st = getslots!(x)
                 for (i, (T, name)) in enumerate(st)
-                    slot = TypedSlot(i, T)
+                    slot = Core.TypedSlot(i, T)
                     push!(x.decls, slot)
                     push!(x, T)
                     if i > nargs # if not defined in arguments, define in body
@@ -288,7 +288,7 @@ end
 """
 A node to inline expressions into the AST
 """
-immutable InlineNode
+struct InlineNode
     deps::Vector
     expression::Expr
 end
@@ -367,15 +367,22 @@ function rewrite_quotenode(m::LazyMethod, node)
     node.value
 end
 
-specialized_typeof{T}(::T) = T
-specialized_typeof{T}(::Type{T}) = Type{T}
-unspecialized_type{T}(::Type{Type{T}}) = T
-unspecialized_type{T}(::Type{T}) = T
+function specialized_typeof(::T) where T
+	T
+end
+function specialized_typeof(::Type{T}) where T
+	Type{T}
+end
+function unspecialized_type(::Type{Type{T}}) where T
+	T
+end
+function unspecialized_type(::Type{T}) where T
+	T
+end
 
-
-make_typed_slot(m, slot::SlotNumber) = TypedSlot(slot.id, slottype(m, slot))
-make_typed_slot(m, slot::TypedSlot) = slot
-function make_typed_slot(m, slot::SSAValue)
+make_typed_slot(m, slot::Core.SlotNumber) = Core.TypedSlot(slot.id, slottype(m, slot))
+make_typed_slot(m, slot::Core.TypedSlot) = slot
+function make_typed_slot(m, slot::Core.SSAValue)
     newslot!(m, slottype(m, slot), slotname(m, slot))
 end
 
@@ -474,12 +481,12 @@ function rewrite_ast(m, expr)
     end)
     list = replace_expr(expr) do expr
         try
-            if isa(expr, SlotNumber)
+            if isa(expr, Core.SlotNumber)
                 # lets make things simple and always use typed slots
                 typ = expr_type(m, expr)
                 push!(m, typ)
-                return true, TypedSlot(expr.id, typ)
-            elseif isa(expr, SSAValue)
+                return true, Core.TypedSlot(expr.id, typ)
+            elseif isa(expr, Core.SSAValue)
                 # lets make things simple and always use typed slots
                 typ = expr_type(m, expr)
                 push!(m, typ)
@@ -514,7 +521,7 @@ function rewrite_ast(m, expr)
                     return true, res
                 elseif head == :call
                     func = args[1]
-                    types = (map(x-> expr_type(m, x), args[2:end])...)
+                    types = map(x-> expr_type(m, x), args[2:end])
                     FT = Sugar.expr_type(m, func)
                     return_type = expr_type(m, expr)
 
@@ -587,7 +594,7 @@ function rewrite_ast(m, expr)
             if isa(expr, LazyMethod)
                 assert_validity(expr)
                 push!(m, expr)
-            elseif isa(expr, Union{TypedSlot, SSAValue})
+            elseif isa(expr, Union{Core.TypedSlot, Core.SSAValue})
                 push!(m, expr_type(m, expr))
             end
         catch e
@@ -658,7 +665,7 @@ function dependencies!(lm::LazyMethod, recursive = false)
             push!(lm, elem)
         end
         RT = returntype(lm)
-        if isa(RT, DataType) && RT != Void && RT != Union{}
+        if isa(RT, DataType) && !isnothing(RT) && RT != Union{}
             push!(lm, RT)
         end
         getast!(lm) # walks ast && insertes dependencies
@@ -771,27 +778,33 @@ expr_type(x) = expr_type(nothing, x)
 
 expr_type(lm, x::Expr) = x.typ
 expr_type(lm, x::GlobalRef) = specialized_typeof(getfield(x.mod, x.name))
-expr_type{T}(lm, x::Type{T}) = Type{T}
-expr_type{T}(lm, x::T) = T
+function expr_type(lm, x::Type{T}) where T
+	Type{T}
+end
+function expr_type(lm, x::T) where T
+	T
+end
 expr_type(lm, x::InlineNode) = expr_type(lm, x.expression)
 
-expr_type(lm::Void, x::TypedSlot) = x.typ
-expr_type(lm::LazyMethod, x::TypedSlot) = x.typ
+expr_type(lm::Nothing, x::Core.TypedSlot) = x.typ
+expr_type(lm::LazyMethod, x::Core.TypedSlot) = x.typ
 
-function expr_type(lm::Void, slot::Union{Slot, SSAValue})
+function expr_type(lm::Nothing, slot::Union{Core.Slot, Core.SSAValue})
     error("Can't get expression type of an untyped SSAValue/Slot without a propper method context")
 end
-expr_type(lm::LazyMethod, slot::Union{Slot, SSAValue}) = slottype(lm, slot)
+expr_type(lm::LazyMethod, slot::Union{Core.Slot, Core.SSAValue}) = slottype(lm, slot)
 function expr_type(lm, m::LazyMethod)
     isfunction(m) ? typeof(getfunction(m)) : m.signature
 end
 
-function instance{F <: Function}(x::Type{F})
+function instance(x::Type{F}) where {F <: Function}
     F.instance
 end
-instance{T}(x::Type{T}) = x
+instance(x::Type) = x
 
-extract_type{T}(x::Type{T}) = T
+function extract_type(x::Type{T}) where T
+	T
+end
 
 """
 Takes any value found in the context of a LazyMethod and returns
@@ -805,10 +818,12 @@ function resolve_func(m, f::LazyMethod)
     end
 end
 resolve_func(m, f::AllFuncs) = f
-resolve_func{T}(m, X::Type{Type{T}}) = T
-resolve_func{T}(m, X::Type{T}) = X
+function resolve_func(m, X::Type{Type{T}}) where T
+	T
+end
+resolve_func(m, X::Type) = X
 resolve_func(m, f::Union{GlobalRef, Symbol}) = eval(f)
-function resolve_func(m, val::Union{Slot, SSAValue, Expr})
+function resolve_func(m, val::Union{Core.Slot, Core.SSAValue, Expr})
     f = expr_type(m, val)
     if isclosure(f)
         return resolve_func(m, f)
@@ -825,7 +840,7 @@ end
 
 function replace_slots(m::LazyMethod, ast)
     first(Sugar.replace_expr(ast) do expr
-        if isa(expr, Slot) || isa(expr, SSAValue)
+        if isa(expr, Slot) || isa(expr, Core.SSAValue)
             return true, slotname(m, expr)
         elseif isa(expr, NewvarNode)
             return true, :(local $(slotname(m, expr.slot)))

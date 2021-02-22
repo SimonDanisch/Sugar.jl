@@ -1,13 +1,13 @@
 __precompile__(true)
 module Sugar
 
-using Matcha, MacroTools, DataStructures, Compat
+using Matcha, MacroTools, DataStructures
 
 const AllFuncs = Union{Function, Core.Builtin, Core.IntrinsicFunction}
 const IntrinsicFuncs = Union{Core.Builtin, Core.IntrinsicFunction}
 
 # All kind of patterns for regex/matcha. Contains also matching isa functions
-include("patterns.jl")
+# include("patterns.jl")
 
 # various tools to replace and work with asts
 # TODO figure out what can be used from the great MacroTools

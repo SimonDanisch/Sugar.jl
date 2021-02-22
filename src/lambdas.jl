@@ -1,4 +1,4 @@
-immutable NoMethodError <: Exception
+struct NoMethodError <: Exception
     func
     types::Tuple
 end
@@ -9,7 +9,7 @@ function Base.showerror(io::IO, e::NoMethodError)
 end
 
 # Give string based stages a type
-immutable CodeLLVM
+struct CodeLLVM
     source::String
 end
 function CodeLLVM(f, types)
@@ -18,7 +18,7 @@ function CodeLLVM(f, types)
     end
     CodeLLVM(src)
 end
-immutable CodeNative
+struct CodeNative
     source::String
 end
 function CodeNative(f, types)
@@ -28,35 +28,28 @@ function CodeNative(f, types)
     CodeNative(src)
 end
 
-
-const SCodeInfo = if isdefined(:LambdaInfo)
-    LambdaInfo
-elseif isdefined(:CodeInfo)
-    CodeInfo
-else
-    error("Unsupported Julia Version")
-end
-
 # deal with all variances in base that should really be tuples but are something else
 to_tuple(x) = (x,)
 to_tuple(x::Core.SimpleVector) = tuple(x...)
 to_tuple(x::Tuple) = x
 to_tuple(x::AbstractVector) = tuple(x...)
-to_tuple{T<:Tuple}(x::Type{T}) = tuple(x.parameters...)
+to_tuple(x::Type{Tuple}) = tuple(x.parameters...)
 
 # typeof working with concrete and types at the same time
-_typeof{T}(x::Type{T}) = Type{T}
-_typeof{T}(x::T) = T
-
-jlhome() = ccall(:jl_get_julia_home, Any, ())
+function _typeof(x::Type{T}) where T
+	Type{T}
+end
+function _typeof(x::T) where T
+	T
+end
 
 function juliabasepath(file)
-    srcdir = joinpath(jlhome(),"..","..","base")
-    releasedir = joinpath(jlhome(),"..","share","julia","base")
+    srcdir = joinpath(Sys.BINDIR,"..","..","base")
+    releasedir = joinpath(Sys.BINDIR,"..","share","julia","base")
     normpath(joinpath(isdir(srcdir) ? srcdir : releasedir, file))
 end
 
-function get_source_file(path::AbstractString, ln)
+function get_source_file(path::AbstractString, ln::Int)
     isfile(path) && return path
     # if not a file, it might be in julia base
     file = juliabasepath(path)
@@ -84,7 +77,7 @@ function get_ast(pass, f, types)
     lambda = get_lambda(pass, f, types)
     get_ast(lambda)
 end
-function get_ast(li::SCodeInfo)
+function get_ast(li::Core.CodeInfo)
     ast = li.code
     if isa(ast, Vector{UInt8})
         return Base.uncompressed_ast(li)
@@ -172,7 +165,7 @@ end
 Looks up the source of `method` in the file path found in `method`.
 Returns the AST and source string, might throw an LoadError if file not found.
 """
-function get_source_at(file, linestart)
+function get_source_at(file, linestart::Int)
     file = get_source_file(file, linestart)
     code, str = open(file) do io
         line = ""
@@ -195,9 +188,9 @@ function get_source_at(file, linestart)
     code, str
 end
 
-function get_source(method)
+function get_source(method::Method)
     file = string(method.file)
-    linestart = method.line
+    linestart::Int = method.line
     code, str = get_source_at(file, linestart)
     # for consistency, we always return the `function f(args...) end` form
     long = MacroTools.longdef(code)
